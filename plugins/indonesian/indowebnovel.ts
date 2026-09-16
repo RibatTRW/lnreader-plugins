@@ -9,20 +9,34 @@ class IndoWebNovel implements Plugin.PluginBase {
   name = 'IndoWebNovel';
   icon = 'src/id/indowebnovel/icon.png';
   site = 'https://indowebnovel.id/';
-  version = '1.2.4';
+  version = '1.3.0';
 
   parseNovels(loadedCheerio: CheerioAPI) {
     const novels: Plugin.NovelItem[] = [];
 
-    loadedCheerio('.flexbox2-item').each((i, el) => {
-      const novelName = loadedCheerio(el)
-        .find('.flexbox2-title span')
-        .first()
-        .text();
-      const novelCover = loadedCheerio(el).find('img').attr('src');
-      const novelUrl = loadedCheerio(el)
-        .find('.flexbox2-content > a')
-        .attr('href');
+    // The search/paged listing (`page/<n>/?s`) renders `.flexbox2-item`
+    // cards, while the front page renders `.flexbox3-item` cards (latest
+    // updates) and `.popular .flexbox-item` cards (ranked list). Accept
+    // every variant so a listing page never parses to zero novels just
+    // because the server returned another listing layout.
+    const items = loadedCheerio('.flexbox2-item').length
+      ? loadedCheerio('.flexbox2-item')
+      : loadedCheerio('.flexbox3-item').length
+        ? loadedCheerio('.flexbox3-item')
+        : loadedCheerio('.popular .flexbox-item');
+
+    items.each((i, el) => {
+      const item = loadedCheerio(el);
+      const novelName = (
+        item.find('.flexbox2-title span').first().text() ||
+        item.find('.title a').first().text() ||
+        item.find('.flexbox-title').first().text()
+      ).trim();
+      const novelCover = item.find('img').attr('src');
+      const novelUrl =
+        item.find('.flexbox2-content > a').attr('href') ||
+        item.find('.flexbox3-content > a').attr('href') ||
+        item.find('a').attr('href');
 
       if (!novelUrl) return;
 
@@ -102,10 +116,22 @@ class IndoWebNovel implements Plugin.PluginBase {
 
       if (!chapterUrl) return;
 
-      chapters.push({
+      const chapter: Plugin.ChapterItem = {
         name: chapterName,
         path: chapterUrl.slice(this.site.length),
-      });
+      };
+
+      // Each entry also holds a `span.date` like "October 23, 2025".
+      const releaseDate = loadedCheerio(el)
+        .find('span.date')
+        .first()
+        .text()
+        .trim();
+      if (releaseDate && !isNaN(Date.parse(releaseDate))) {
+        chapter.releaseTime = new Date(releaseDate).toISOString();
+      }
+
+      chapters.push(chapter);
     });
 
     novel.chapters = chapters.reverse();
