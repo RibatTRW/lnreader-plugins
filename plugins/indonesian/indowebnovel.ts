@@ -9,7 +9,7 @@ class IndoWebNovel implements Plugin.PluginBase {
   name = 'IndoWebNovel';
   icon = 'src/id/indowebnovel/icon.png';
   site = 'https://indowebnovel.id/';
-  version = '1.2.3';
+  version = '1.2.4';
 
   parseNovels(loadedCheerio: CheerioAPI) {
     const novels: Plugin.NovelItem[] = [];
@@ -88,8 +88,16 @@ class IndoWebNovel implements Plugin.PluginBase {
 
     const chapters: Plugin.ChapterItem[] = [];
 
-    loadedCheerio('.series-chapterlist li').each((i, el) => {
-      const chapterName = loadedCheerio(el).find('a').text().trim();
+    loadedCheerio('.series-chapterlists li').each((i, el) => {
+      // The list entry also holds a `span.date`; drop it so the chapter name
+      // does not end with the release date.
+      const chapterName = loadedCheerio(el)
+        .find('a span')
+        .not('.date')
+        .first()
+        .text()
+        .replace(/\s+/g, ' ')
+        .trim();
       const chapterUrl = loadedCheerio(el).find('a').attr('href');
 
       if (!chapterUrl) return;
@@ -111,7 +119,11 @@ class IndoWebNovel implements Plugin.PluginBase {
 
     const loadedCheerio = parseHTML(body);
 
-    const chapterText = loadedCheerio('.adsads').html() || '';
+    // The chapter body is nested in `main .content .container` behind a div
+    // whose class is a rotating random token (the previous hardcoded name,
+    // `.adsads`, no longer exists), so use the stable inner `#content`
+    // element instead of that wrapper class.
+    const chapterText = loadedCheerio('main #content').html() || '';
 
     return chapterText;
   }
