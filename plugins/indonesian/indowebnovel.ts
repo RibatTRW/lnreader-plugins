@@ -9,7 +9,26 @@ class IndoWebNovel implements Plugin.PluginBase {
   name = 'IndoWebNovel';
   icon = 'src/id/indowebnovel/icon.png';
   site = 'https://indowebnovel.id/';
-  version = '1.3.0';
+  version = '1.3.1';
+
+  private headers = {
+    'User-Agent':
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    Accept:
+      'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+    'Accept-Language': 'id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7',
+    Referer: 'https://indowebnovel.id/',
+  };
+
+  private async fetchPage(url: string) {
+    const res = await fetchApi(url, { headers: this.headers });
+    if (!res.ok) {
+      throw Object.assign(new Error('Request failed: ' + res.status), {
+        status: res.status,
+      });
+    }
+    return res.text();
+  }
 
   parseNovels(loadedCheerio: CheerioAPI) {
     const novels: Plugin.NovelItem[] = [];
@@ -66,16 +85,14 @@ class IndoWebNovel implements Plugin.PluginBase {
       link += filters.genre.value.map(i => `&genre[]=${i}`).join('');
     */
     const link = this.site + `page/${page}/?s`;
-    const result = await fetchApi(link);
-    const body = await result.text();
+    const body = await this.fetchPage(link);
 
     const loadedCheerio = parseHTML(body);
     return this.parseNovels(loadedCheerio);
   }
 
   async parseNovel(novelPath: string): Promise<Plugin.SourceNovel> {
-    const result = await fetchApi(this.site + novelPath);
-    const body = await result.text();
+    const body = await this.fetchPage(this.site + novelPath);
 
     const loadedCheerio = parseHTML(body);
     loadedCheerio('.series-synops div').remove();
@@ -140,8 +157,7 @@ class IndoWebNovel implements Plugin.PluginBase {
   }
 
   async parseChapter(chapterPath: string): Promise<string> {
-    const result = await fetchApi(this.site + chapterPath);
-    const body = await result.text();
+    const body = await this.fetchPage(this.site + chapterPath);
 
     const loadedCheerio = parseHTML(body);
 
@@ -166,8 +182,7 @@ class IndoWebNovel implements Plugin.PluginBase {
     link += this.filters.lang.value.map(i => `&country[]=${i}`).join('');
     */
     const link = this.site + `page/${page}/?s=${searchTerm}`;
-    const result = await fetchApi(link);
-    const body = await result.text();
+    const body = await this.fetchPage(link);
 
     const loadedCheerio = parseHTML(body);
     return this.parseNovels(loadedCheerio);
