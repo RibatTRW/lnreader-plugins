@@ -27,19 +27,27 @@ import { defaultCover } from '@libs/defaultCover';
 class DaoTekno implements Plugin.PluginBase {
   id = 'daotekno';
   name = 'DaoTekno';
-  version = '1.0.0';
+  version = '1.0.1';
   icon = 'src/en/daotekno/icon.png';
   site = 'https://daotekno.com/';
 
   // Browser-like headers (important for Cloudflare-fronted sites, which
-  // may serve a bot-check page to requests without a User-Agent). The UA
-  // is a mobile Chrome: the site serves chapter pages only to mobile UAs.
+  // serve a bot-check page to requests without them). The UA is a mobile
+  // Chrome: the site serves chapter pages only to mobile UAs. The
+  // sec-ch-ua/sec-fetch-* fields mirror what a Chrome fetch() sends here
+  // (Sec-Fetch-Mode: cors is added by fetchApi's default headers).
   private headers = {
     'User-Agent':
       'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36',
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
     'Accept-Language': 'en-US,en;q=0.9',
     'Referer': this.site,
+    'sec-ch-ua':
+      '"Chromium";v="126", "Not(A:Brand";v="24", "Google Chrome";v="126"',
+    'sec-ch-ua-mobile': '?1',
+    'sec-ch-ua-platform': '"Android"',
+    'Sec-Fetch-Site': 'cross-site',
+    'Sec-Fetch-Dest': 'empty',
   };
 
   // Throw (carrying the HTTP status) on a refused response so a
