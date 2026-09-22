@@ -8,9 +8,6 @@ import { load } from 'cheerio';
 type ReadNovelFullOptions = {
   lang?: string;
   versionIncrements?: number;
-  down?: boolean;
-  downSince?: number;
-  downNote?: string;
   latestPage: string;
   searchPage: string;
   chapterListing?: string;
@@ -61,22 +58,6 @@ export class ReadNovelFullPlugin implements Plugin.PluginBase {
 
   lastSearch: number | null = null;
   searchInterval = 3400;
-
-  /**
-   * Sources marked `down` in sources.json point at a site that is offline or
-   * gone for good. Fail fast with the recorded reason instead of letting every
-   * request die as an opaque network error the user cannot act on.
-   */
-  private assertSourceUp(): void {
-    if (!this.options.down) return;
-    const since = this.options.downSince
-      ? ` since ${new Date(this.options.downSince).toISOString().slice(0, 10)}`
-      : '';
-    const note = this.options.downNote ? ` ${this.options.downNote}` : '';
-    throw new Error(
-      `${this.name} has been marked down${since}: ${this.site} is offline and cannot be reached.${note}`,
-    );
-  }
 
   async sleep(ms: number) {
     return new Promise(resolve => setTimeout(resolve, ms));
@@ -299,7 +280,6 @@ export class ReadNovelFullPlugin implements Plugin.PluginBase {
       showLatestNovels,
     }: Plugin.PopularNovelsOptions<typeof this.filters>,
   ): Promise<Plugin.NovelItem[]> {
-    this.assertSourceUp();
     const {
       pageParam = 'page',
       novelListing,
@@ -376,7 +356,6 @@ export class ReadNovelFullPlugin implements Plugin.PluginBase {
   }
 
   async parseNovel(novelPath: string): Promise<Plugin.SourceNovel> {
-    this.assertSourceUp();
     const url = this.site + novelPath;
     const result = await fetchApi(url);
     const body = await result.text();
@@ -760,7 +739,6 @@ export class ReadNovelFullPlugin implements Plugin.PluginBase {
   }
 
   async parseChapter(chapterPath: string): Promise<string> {
-    this.assertSourceUp();
     const response = await fetchApi(this.site + chapterPath);
     let html = await response.text();
     if (this.options?.customJs) {
@@ -919,7 +897,6 @@ export class ReadNovelFullPlugin implements Plugin.PluginBase {
     searchTerm: string,
     page: number,
   ): Promise<Plugin.NovelItem[]> {
-    this.assertSourceUp();
     const now = Date.now();
     if (this.lastSearch && now - this.lastSearch <= this.searchInterval) {
       await this.sleep(this.searchInterval);
