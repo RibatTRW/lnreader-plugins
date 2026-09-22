@@ -77,7 +77,10 @@
     "options": {
       "latestPage": "sort/latest",
       "searchPage": "search",
-      "versionIncrements": 1,
+      "versionIncrements": 2,
+      "down": true,
+      "downSince": 1790067015000,
+      "downNote": "Novel Bin's domain no longer resolves and the site has been offline since 2026. Readers have moved to Novel Arrow, whose catalogue closely mirrors Novel Bin's - install the 'Novel Arrow' plugin instead.",
       "customJs": "$('[class*=\"app-promo\"]').remove();"
     }
   },
