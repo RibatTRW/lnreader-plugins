@@ -18,6 +18,19 @@ type MadaraOptions = {
   versionIncrements?: number;
   customJs?: string;
   hasLocked?: boolean;
+  /**
+   * Sources that publish coin-locked (premium) chapters with `href="#"` but a
+   * guessable `/series/<slug>/chapter-<n>/` URL. When enabled, those rows are
+   * listed, labelled by lock state and reported honestly by parseChapter
+   * instead of being dropped.
+   */
+  listPremiumChapters?: boolean;
+};
+
+type PremiumChapterRow = {
+  title: string;
+  releaseText: string;
+  coins: string;
 };
 
 export type MadaraMetadata = {
@@ -362,24 +375,45 @@ export class MadaraPlugin implements Plugin.PluginBase {
 
     const totalChapters = loadedCheerio('.wp-manga-chapter').length;
     loadedCheerio('.wp-manga-chapter').each((chapterIndex, element) => {
-      let chapterName = loadedCheerio(element).find('a').text().trim();
-      const locked = element.attribs['class'].includes('premium-block');
-      if (locked) {
-        chapterName = '🔒 ' + chapterName;
-      }
+      const rowClass = element.attribs['class'] || '';
+      const locked = rowClass.includes('premium-block');
+      const chapterTitle = loadedCheerio(element).find('a').text().trim();
+      let chapterName = chapterTitle;
 
       let releaseDate = loadedCheerio(element)
         .find('span.chapter-release-date')
         .text()
         .trim();
 
+      const releaseText = releaseDate;
       if (releaseDate) {
         releaseDate = this.parseData(releaseDate);
       } else {
         releaseDate = dayjs().format('LL');
       }
 
-      const chapterUrl = loadedCheerio(element).find('a').attr('href') || '';
+      let chapterUrl = loadedCheerio(element).find('a').attr('href') || '';
+
+      if (this.options?.listPremiumChapters && locked) {
+        // Coin-locked rows have no link; the site serves them from
+        // /series/<slug>/chapter-<n>/ and gates the body server-side.
+        if (!chapterUrl || chapterUrl === '#') {
+          chapterUrl =
+            this.premiumChapterUrl(novelPath, chapterTitle) || chapterUrl;
+        }
+        chapterName +=
+          ' ' +
+          this.premiumChapterLabel(
+            releaseText,
+            this.premiumChapterCoins(
+              rowClass,
+              loadedCheerio(element).find('span.coin').text(),
+            ),
+          );
+        releaseDate = '';
+      } else if (locked) {
+        chapterName = '🔒 ' + chapterName;
+      }
 
       if (chapterUrl && chapterUrl != '#' && !(locked && this.hideLocked)) {
         chapters.push({
@@ -397,6 +431,27 @@ export class MadaraPlugin implements Plugin.PluginBase {
 
   async parseChapter(chapterPath: string): Promise<string> {
     const loadedCheerio = await this.getCheerio(this.site + chapterPath, false);
+
+    if (this.options?.listPremiumChapters) {
+      const lockedBlock = loadedCheerio(
+        '.reading-content .content-blocked, .reading-content .premium-block',
+      ).first();
+      if (lockedBlock.length > 0) {
+        throw new Error(
+          await this.getPremiumChapterError(
+            chapterPath,
+            loadedCheerio,
+            lockedBlock,
+          ),
+        );
+      }
+      if (loadedCheerio('#wp-manga-current-chap').length === 0) {
+        throw new Error(
+          'This chapter could not be found on the site (the URL listed for it may be out of date).',
+        );
+      }
+    }
+
     const chapterText =
       loadedCheerio('.text-left') ||
       loadedCheerio('.text-right') ||
@@ -428,6 +483,137 @@ export class MadaraPlugin implements Plugin.PluginBase {
       '&post_type=wp-manga';
     const loadedCheerio = await this.getCheerio(url, true);
     return this.parseNovels(loadedCheerio);
+  }
+
+  /**
+   * Rebuilds the real (still coin-gated) chapter URL of a premium row from its
+   * chapter name, e.g. "Chapter 27.2" -> series/<slug>/chapter-27-2/. A
+   * non-ASCII suffix written directly after the number (e.g. the adult marker
+   * in "Chapter 176 🔞") is part of the site's slug, while " - Title" suffixes
+   * are not.
+   */
+  premiumChapterUrl(novelPath: string, chapterTitle: string) {
+    const match = chapterTitle.match(/(\d+(?:\.\d+)?)(.*)$/);
+    if (!match) return '';
+
+    const number = match[1].replace(/\./g, '-');
+    const tail = match[2].trim();
+    const suffix =
+      tail && tail.charCodeAt(0) > 0x7f ? tail.split(/\s+/)[0] : '';
+    const slug = novelPath
+      .replace(/^https?:\/\/[^/]+/, '')
+      .replace(/^\/+|\/+$/g, '');
+
+    return (
+      slug +
+      '/chapter-' +
+      number +
+      (suffix ? '-' + encodeURIComponent(suffix) : '') +
+      '/'
+    );
+  }
+
+  premiumChapterCoins(rowClass: string, coinText: string) {
+    const price = /coin-(\d+)/.exec(rowClass);
+    return price ? price[1] : coinText.replace(/\D/g, '');
+  }
+
+  /** "Unlocked in 3 weeks" -> "3 weeks" (undefined for TBA or a plain date). */
+  premiumChapterUnlockIn(releaseText: string) {
+    const unlock = /unlocked in\s+(.+)/i.exec(releaseText);
+    return unlock ? unlock[1].trim() : undefined;
+  }
+
+  premiumChapterLabel(releaseText: string, coins: string) {
+    const unlockIn = this.premiumChapterUnlockIn(releaseText);
+    if (unlockIn) return `[Soon - unlocks in ${unlockIn}]`;
+    return coins ? `[Premium - ${coins} coins]` : '[Premium - coin-locked]';
+  }
+
+  /** Fail-loud message for a chapter whose body the site gates behind coins. */
+  async getPremiumChapterError(
+    chapterPath: string,
+    loadedCheerio: CheerioAPI,
+    lockedBlock: Cheerio<AnyNode>,
+  ) {
+    const chapterId =
+      loadedCheerio('#wp-manga-current-chap').attr('data-id') ||
+      /data-chapter-(\d+)/.exec(lockedBlock.attr('class') || '')?.[1] ||
+      '';
+    let coins = this.premiumChapterCoins(
+      lockedBlock.attr('class') || '',
+      lockedBlock.find('.coin').text(),
+    );
+    let title = '';
+    let releaseText = '';
+
+    // The locked page looks the same whether the chapter is TBA or has an
+    // unlock countdown, so read the state from the series' chapter list.
+    const row = await this.getPremiumChapterRow(chapterPath, chapterId);
+    if (row) {
+      title = row.title;
+      releaseText = row.releaseText;
+      coins = row.coins || coins;
+    }
+
+    const name = title ? `${title} is ` : 'This chapter is ';
+    const price = coins ? ` (${coins} coins)` : '';
+    const unlockIn = this.premiumChapterUnlockIn(releaseText);
+
+    if (unlockIn) {
+      return (
+        `${name}a scheduled premium chapter: the site unlocks it for free in ` +
+        `${unlockIn}, and it is coin-locked${price} until then. LNReader cannot ` +
+        `bypass the site's coin gate - open it on ${this.site} to unlock it with coins.`
+      );
+    }
+
+    return (
+      `${name}a locked premium chapter${price}: its free-unlock date is TBA, ` +
+      `and LNReader cannot bypass the site's coin gate - open it on ` +
+      `${this.site} to unlock it with coins.`
+    );
+  }
+
+  async getPremiumChapterRow(
+    chapterPath: string,
+    chapterId: string,
+  ): Promise<PremiumChapterRow | undefined> {
+    const parts = chapterPath.split('/').filter(part => part !== '');
+    if (!chapterId || parts.length < 3 || parts[0] !== 'series')
+      return undefined;
+
+    const seriesPath = parts[0] + '/' + parts[1] + '/';
+    try {
+      const html = await fetchApi(this.site + seriesPath + 'ajax/chapters/', {
+        method: 'POST',
+        referrer: this.site + seriesPath,
+      }).then((res: Response) => res.text());
+      if (!html || html === '0') return undefined;
+
+      const marker = 'data-chapter-' + chapterId;
+      const $rows = parseHTML(html);
+      let found: PremiumChapterRow | undefined;
+      $rows('.wp-manga-chapter').each((index, element) => {
+        const rowClass = element.attribs['class'] || '';
+        if (found || !rowClass.includes(marker)) return;
+        if (!rowClass.includes('premium-block')) return;
+
+        const row = $rows(element);
+        found = {
+          title: row.find('a').text().replace(/\s+/g, ' ').trim(),
+          releaseText: row
+            .find('span.chapter-release-date')
+            .text()
+            .replace(/\s+/g, ' ')
+            .trim(),
+          coins: this.premiumChapterCoins(rowClass, row.find('.coin').text()),
+        };
+      });
+      return found;
+    } catch {
+      return undefined;
+    }
   }
 
   parseData = (date: string) => {
