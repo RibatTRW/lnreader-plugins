@@ -18,6 +18,7 @@ type MadaraOptions = {
   versionIncrements?: number;
   customJs?: string;
   hasLocked?: boolean;
+  listLockedChapters?: boolean;
 };
 
 export type MadaraMetadata = {
@@ -362,24 +363,53 @@ export class MadaraPlugin implements Plugin.PluginBase {
 
     const totalChapters = loadedCheerio('.wp-manga-chapter').length;
     loadedCheerio('.wp-manga-chapter').each((chapterIndex, element) => {
-      let chapterName = loadedCheerio(element).find('a').text().trim();
-      const locked = element.attribs['class'].includes('premium-block');
-      if (locked) {
-        chapterName = '🔒 ' + chapterName;
-      }
+      const chapterElement = loadedCheerio(element);
+      const chapterTitle = chapterElement.find('a').text().trim();
+      const rowClass = element.attribs['class'] || '';
+      let chapterName = chapterTitle;
+      const locked = rowClass.includes('premium-block');
+      const listLocked = locked && !!this.options?.listLockedChapters;
 
-      let releaseDate = loadedCheerio(element)
+      let releaseDate = chapterElement
         .find('span.chapter-release-date')
         .text()
         .trim();
 
-      if (releaseDate) {
-        releaseDate = this.parseData(releaseDate);
-      } else {
-        releaseDate = dayjs().format('LL');
+      let chapterUrl = chapterElement.find('a').attr('href') || '';
+
+      if (listLocked) {
+        // Coin-locked rows link to "#"; rebuild the real (still server-gated)
+        // URL and surface the coin price plus the unlock state in the name.
+        const coinMatch = rowClass.match(/\bcoin-(\d+)\b/);
+        const price =
+          coinMatch?.[1] || chapterElement.find('span.coin').text().trim();
+        const lockState = releaseDate.replace(/\s+/g, ' ').trim() || 'locked';
+        chapterName =
+          chapterTitle.replace(/\s+/g, ' ') +
+          ` [Premium - ${price ? `${price} coins - ` : ''}${lockState}]`;
+
+        if (!chapterUrl || chapterUrl == '#') {
+          const derivedPath = this.parseLockedChapterPath(
+            novelPath,
+            chapterTitle,
+          );
+          const chapterId = rowClass.match(/data-chapter-(\d+)/)?.[1];
+          chapterUrl = derivedPath
+            ? derivedPath + (chapterId ? `?chapter-id=${chapterId}` : '')
+            : '';
+        }
+
+        // "TBA"/countdown is not a publication date; it is already in the name.
+        releaseDate = '';
+      } else if (locked) {
+        chapterName = '🔒 ' + chapterName;
       }
 
-      const chapterUrl = loadedCheerio(element).find('a').attr('href') || '';
+      if (releaseDate) {
+        releaseDate = this.parseData(releaseDate);
+      } else if (!listLocked) {
+        releaseDate = dayjs().format('LL');
+      }
 
       if (chapterUrl && chapterUrl != '#' && !(locked && this.hideLocked)) {
         chapters.push({
@@ -395,8 +425,88 @@ export class MadaraPlugin implements Plugin.PluginBase {
     return novel;
   }
 
+  /**
+   * Coin-locked chapter rows link to "#", so their real (still server-gated)
+   * URL has to be rebuilt from the chapter name. The rule below was measured
+   * against the site's own free-row hrefs (3288/3289 exact): a leading
+   * "Chapter <number>" is the slug number (dots become dashes), an emoji token
+   * right after the number is kept (Chapter 141 🔞 -> chapter-141-%F0%9F%94%9E),
+   * while a " - subtitle" suffix is not part of the slug (Chapter 166 - Secret
+   * -> chapter-166). Returns null when no number can be read from the name.
+   */
+  parseLockedChapterPath(
+    novelPath: string,
+    chapterName: string,
+  ): string | null {
+    const normalized = chapterName.replace(/\s+/g, ' ').trim();
+    const named = /^Chapter\s+(\d+(?:\.\d+)?)\s*(.*)$/i.exec(normalized);
+    const number = named?.[1] || normalized.match(/(\d+(?:\.\d+)?)/)?.[1] || '';
+    if (!number) return null;
+
+    let suffix = number.replace(/\./g, '-');
+    const rest = named?.[2]?.trim() || '';
+    if (rest && !rest.startsWith('-')) {
+      const token = rest.split(/\s/)[0];
+      // Keep an emoji/non-ASCII token that directly follows the number
+      // (Chapter 141 🔞 -> chapter-141-%F0%9F%94%9E); ASCII subtitles are not
+      // part of the slug.
+      if ((token.codePointAt(0) || 0) > 0x7f) {
+        suffix += '-' + encodeURIComponent(token);
+      }
+    }
+
+    return novelPath.replace(/\/?$/, '/') + 'chapter-' + suffix + '/';
+  }
+
   async parseChapter(chapterPath: string): Promise<string> {
     const loadedCheerio = await this.getCheerio(this.site + chapterPath, false);
+
+    if (this.options?.listLockedChapters) {
+      const currentChapter = loadedCheerio('#wp-manga-current-chap');
+      // A rebuilt /chapter-<n>/ URL can silently fall back to the series page
+      // (HTTP 200) when the site's slug differs from the chapter number.
+      if (currentChapter.length === 0) {
+        throw new Error(
+          `Could not find this chapter's page on ${this.name}. The chapter may have moved or its URL may have changed.`,
+        );
+      }
+
+      // Rebuilt paths carry the listing row's own post id; if the site resolves
+      // the URL to a different post (duplicate chapter numbers), say so instead
+      // of showing another chapter's notice as if it were this one.
+      const expectedId = /[?&]chapter-id=(\d+)/.exec(chapterPath)?.[1];
+      const pageId = currentChapter.attr('data-id');
+      if (expectedId && pageId && expectedId !== pageId) {
+        throw new Error(
+          `This chapter could not be located on ${this.name}: its URL resolves to a different chapter (post ${pageId}). The site may have renamed it.`,
+        );
+      }
+
+      // The site serves locked chapters as HTTP 200 with the body replaced by a
+      // lock notice, so fail loudly instead of returning an empty chapter. The
+      // price is read from that notice, which also covers rows still listed as
+      // free whose page is already gated.
+      const readingContent = loadedCheerio('.reading-content');
+      const lockBlock = readingContent.find('.content-blocked, .premium-block');
+      const hasBodyText =
+        readingContent.find('.text-left, .text-right').text().trim().length > 0;
+      const lockedNotice =
+        !hasBodyText && /this chapter is locked/i.test(readingContent.text());
+      if (lockBlock.length > 0 || lockedNotice) {
+        const coinMatch = (
+          lockBlock.attr('class') ||
+          readingContent.find('[class*="coin-"]').attr('class') ||
+          ''
+        ).match(/\bcoin-(\d+)\b/);
+        const price = coinMatch
+          ? ` It costs ${coinMatch[1]} coins to unlock.`
+          : '';
+        throw new Error(
+          `This chapter is locked on ${this.name}.${price} It requires a site account and a coin unlock, so its text cannot be shown here.`,
+        );
+      }
+    }
+
     const chapterText =
       loadedCheerio('.text-left') ||
       loadedCheerio('.text-right') ||
