@@ -18,6 +18,13 @@ type MadaraOptions = {
   versionIncrements?: number;
   customJs?: string;
   hasLocked?: boolean;
+  /**
+   * List coin-locked chapters even though their rows carry href="#": the site
+   * serves them at `<novelPath>chapter-<n>/` (n taken from the row title) and
+   * renders a lock notice instead of the body. Also makes parseChapter report
+   * locked or unavailable chapters instead of returning an empty chapter.
+   */
+  listLockedChapters?: boolean;
 };
 
 export type MadaraMetadata = {
@@ -361,6 +368,9 @@ export class MadaraPlugin implements Plugin.PluginBase {
     }
 
     const totalChapters = loadedCheerio('.wp-manga-chapter').length;
+    const lockedChapterPaths = this.options?.listLockedChapters
+      ? await this.deriveLockedChapterPaths(loadedCheerio, novelPath)
+      : new Map<number, string>();
     loadedCheerio('.wp-manga-chapter').each((chapterIndex, element) => {
       let chapterName = loadedCheerio(element).find('a').text().trim();
       const locked = element.attribs['class'].includes('premium-block');
@@ -380,12 +390,19 @@ export class MadaraPlugin implements Plugin.PluginBase {
       }
 
       const chapterUrl = loadedCheerio(element).find('a').attr('href') || '';
+      const derivedPath = lockedChapterPaths.get(chapterIndex);
+      const chapterPath =
+        chapterUrl && chapterUrl != '#'
+          ? chapterUrl.replace(/https?:\/\/.*?\//, '')
+          : derivedPath || '';
 
-      if (chapterUrl && chapterUrl != '#' && !(locked && this.hideLocked)) {
+      if (chapterPath && !(locked && this.hideLocked)) {
         chapters.push({
           name: chapterName,
-          path: chapterUrl.replace(/https?:\/\/.*?\//, ''),
-          releaseTime: releaseDate || null,
+          path: chapterPath,
+          // A locked row's date cell is an unlock countdown ("Unlocked in 4
+          // weeks" / "TBA"), not the chapter's release date.
+          releaseTime: derivedPath ? null : releaseDate || null,
           chapterNumber: totalChapters - chapterIndex,
         });
       }
@@ -395,8 +412,110 @@ export class MadaraPlugin implements Plugin.PluginBase {
     return novel;
   }
 
+  /**
+   * Coin-locked rows carry href="#" in the chapter list, but the site serves
+   * them at `<novelPath>chapter-<n>/`, where <n> is the number in the row title.
+   * The plain slug is used as-is when the title is exactly "Chapter <n>" and
+   * that number is unique in the novel - the site's own free rows confirm the
+   * convention (3065/3083 exact; every exception a suffixed, decimal or
+   * duplicated title). Any other title (subtitles, emoji, repeated numbers) does
+   * not slugify the way it reads, so its candidate slugs are checked against the
+   * chapter page's own post id and the row is skipped rather than listed with a
+   * URL that serves a different chapter or the series page.
+   */
+  async deriveLockedChapterPaths(
+    loadedCheerio: CheerioAPI,
+    novelPath: string,
+  ): Promise<Map<number, string>> {
+    const rows = loadedCheerio('.wp-manga-chapter').toArray();
+    const names = rows.map(row => loadedCheerio(row).find('a').text().trim());
+    const numbers = names.map(name => /^chapter\s+(\d+(?:\.\d+)?)/i.exec(name));
+    const paths = new Map<number, string>();
+
+    for (let index = 0; index < rows.length; index++) {
+      const row = rows[index];
+      const rowClass = row.attribs['class'] || '';
+      if (!rowClass.includes('premium-block')) continue;
+      if ((loadedCheerio(row).find('a').attr('href') || '') !== '#') continue;
+
+      const match = numbers[index];
+      if (!match) continue;
+
+      const number = match[1].replace('.', '-');
+      const plainSlug = `chapter-${number}`;
+      const rest = names[index].slice(match[0].length).trim();
+      const unique =
+        numbers.filter(other => other && other[1] === match[1]).length === 1;
+
+      if (unique && !rest) {
+        paths.set(index, novelPath + plainSlug + '/');
+        continue;
+      }
+
+      const chapterId = /data-chapter-(\d+)/.exec(rowClass)?.[1];
+      if (!chapterId) continue;
+
+      // A trailing marker (e.g. an emoji) is sometimes part of the slug and
+      // sometimes not, so both shapes are tried and verified by post id.
+      const marker = /[^\u0020-\u007e]+/.exec(rest)?.[0];
+      const candidates = marker
+        ? [
+            plainSlug,
+            `${plainSlug}-${encodeURIComponent(marker).toLowerCase()}`,
+          ]
+        : [plainSlug];
+
+      for (const candidate of candidates) {
+        const postId = await this.chapterPostId(novelPath + candidate + '/');
+        if (postId === chapterId) {
+          paths.set(index, novelPath + candidate + '/');
+          break;
+        }
+      }
+    }
+
+    return paths;
+  }
+
+  /**
+   * Post id of the chapter served at `path`, or null when the site answers with
+   * something other than a chapter page (an unknown chapter slug falls back to
+   * the series page).
+   */
+  async chapterPostId(path: string): Promise<string | null> {
+    const loadedCheerio = await this.getCheerio(this.site + path, false);
+    return loadedCheerio('#wp-manga-current-chap').attr('data-id') || null;
+  }
+
   async parseChapter(chapterPath: string): Promise<string> {
     const loadedCheerio = await this.getCheerio(this.site + chapterPath, false);
+
+    if (this.options?.listLockedChapters) {
+      const readingContent = loadedCheerio('.reading-content');
+      // The site replaces a coin-locked chapter's body with a lock notice.
+      if (
+        readingContent.find('.content-blocked').length > 0 ||
+        /this chapter is locked/i.test(readingContent.text())
+      ) {
+        const coins = /coin-(\d+)/.exec(
+          readingContent.find('.content-blocked').attr('class') || '',
+        )?.[1];
+        throw new Error(
+          `This chapter is locked on ${this.name} (premium${
+            coins ? `, ${coins} coins` : ''
+          }). Its text is only served to readers who unlocked it, so it becomes readable here once the site unlocks it.`,
+        );
+      }
+
+      // An unknown chapter URL falls back to the series page, which has no
+      // chapter body: fail loudly instead of returning an empty chapter.
+      if (loadedCheerio('#wp-manga-current-chap').length === 0) {
+        throw new Error(
+          `This chapter is not available on ${this.name} anymore.`,
+        );
+      }
+    }
+
     const chapterText =
       loadedCheerio('.text-left') ||
       loadedCheerio('.text-right') ||
