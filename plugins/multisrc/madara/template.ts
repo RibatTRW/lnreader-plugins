@@ -18,6 +18,14 @@ type MadaraOptions = {
   versionIncrements?: number;
   customJs?: string;
   hasLocked?: boolean;
+  /**
+   * Sources whose premium (coin-locked) chapter rows carry `href="#"` but
+   * whose real URL follows the regular `chapter-<n>` pattern. When enabled,
+   * those rows are listed with a reconstructed path and `parseChapter`
+   * throws a descriptive error for the server-gated locked body instead of
+   * returning an empty chapter.
+   */
+  premiumChapterUrls?: boolean;
 };
 
 export type MadaraMetadata = {
@@ -380,11 +388,17 @@ export class MadaraPlugin implements Plugin.PluginBase {
       }
 
       const chapterUrl = loadedCheerio(element).find('a').attr('href') || '';
+      const premiumPath =
+        locked && this.options?.premiumChapterUrls && chapterUrl === '#'
+          ? this.parsePremiumChapterPath(novelPath, chapterName)
+          : '';
+      const chapterPath =
+        premiumPath || chapterUrl.replace(/https?:\/\/.*?\//, '');
 
-      if (chapterUrl && chapterUrl != '#' && !(locked && this.hideLocked)) {
+      if (chapterPath && chapterPath != '#' && !(locked && this.hideLocked)) {
         chapters.push({
           name: chapterName,
-          path: chapterUrl.replace(/https?:\/\/.*?\//, ''),
+          path: chapterPath,
           releaseTime: releaseDate || null,
           chapterNumber: totalChapters - chapterIndex,
         });
@@ -395,8 +409,41 @@ export class MadaraPlugin implements Plugin.PluginBase {
     return novel;
   }
 
+  /**
+   * Premium rows link to `#`; the site still serves them at the regular
+   * `chapter-<n>` URL. The number is taken from the row text.
+   */
+  parsePremiumChapterPath(novelPath: string, chapterName: string): string {
+    const chapterNumber = chapterName.match(/\d+/)?.[0];
+    const seriesPath = novelPath.replace(/^\/+|\/+$/g, '');
+    if (!chapterNumber || !seriesPath) return '';
+    return `${seriesPath}/chapter-${chapterNumber}/`;
+  }
+
   async parseChapter(chapterPath: string): Promise<string> {
     const loadedCheerio = await this.getCheerio(this.site + chapterPath, false);
+
+    if (this.options?.premiumChapterUrls) {
+      const lockedBlock = loadedCheerio(
+        '.reading-content .content-blocked, .reading-content .premium-block',
+      );
+      const isLocked =
+        lockedBlock.length > 0 ||
+        /this chapter is locked/i.test(
+          loadedCheerio('.reading-content').text(),
+        );
+      if (isLocked) {
+        const coinPrice = (lockedBlock.attr('class') || '').match(
+          /\bcoin-(\d+)\b/,
+        )?.[1];
+        throw new Error(
+          coinPrice
+            ? `Premium chapter locked: costs ${coinPrice} coins and requires a site account to unlock.`
+            : 'Premium chapter locked: requires a site account and coins to unlock.',
+        );
+      }
+    }
+
     const chapterText =
       loadedCheerio('.text-left') ||
       loadedCheerio('.text-right') ||
