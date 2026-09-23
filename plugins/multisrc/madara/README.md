@@ -29,7 +29,8 @@ To add a new source you need to add it to sources.json:
   - listLockedChapters: for sites that render coin-locked chapters with
     `href="#"` (e.g. Tangerine Archive). Lists them with the coin price and lock
     state in the chapter name, rebuilds their `/chapter-<n>/` URL, and makes
-    `parseChapter` throw instead of returning the site's empty lock notice.
+    `parseChapter` throw instead of returning the site's empty lock notice (or a
+    blank body when the derived URL falls back to the series page).
 
 ### icon
 

@@ -421,6 +421,15 @@ export class MadaraPlugin implements Plugin.PluginBase {
     const loadedCheerio = await this.getCheerio(this.site + chapterPath, false);
 
     if (this.options?.listLockedChapters) {
+      // A derived /chapter-<n>/ URL can silently fall back to the series page
+      // (HTTP 200) when the site's slug differs from the chapter number, e.g.
+      // emoji-suffixed titles. Fail loudly instead of returning a blank body.
+      if (loadedCheerio('#wp-manga-current-chap').length === 0) {
+        throw new Error(
+          `Could not find this chapter's page on ${this.name}. The chapter may have moved or its URL may have changed.`,
+        );
+      }
+
       // The site serves premium chapters as HTTP 200 but replaces the body with
       // a lock notice, so fail loudly instead of returning an empty chapter.
       const lockBlock = loadedCheerio(
