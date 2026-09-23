@@ -23,6 +23,12 @@ To add a new source you need to add it to sources.json:
   - lang: the language of the source (default: "English") (check that the language
     exists in the languages (check folder names in "plugins/"))
   - useNewChapterEndpoint: if the source uses the new chapter endpoint
+  - premiumChapterUrls: for sources whose premium (coin-locked) rows use
+    `href="#"`; reconstructs their `chapter-<n>` URL from the row text (keeping
+    an emoji token that is part of the slug), lists those rows, skips a row
+    whose reconstructed URL resolves to a different chapter, and makes
+    `parseChapter` throw a descriptive locked-chapter error instead of
+    returning an empty body
   - versionIncrements: needs to be updated everytime the site url is updated
   - customJS: custom javascript that will be excuted when getting the text (if
     the site has a custom copyright that need to be removed)

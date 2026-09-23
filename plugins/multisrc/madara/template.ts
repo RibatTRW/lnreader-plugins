@@ -18,6 +18,14 @@ type MadaraOptions = {
   versionIncrements?: number;
   customJs?: string;
   hasLocked?: boolean;
+  /**
+   * Sources whose premium (coin-locked) chapter rows carry `href="#"` but
+   * whose real URL still follows the regular `chapter-<n>` pattern. When
+   * enabled, those rows are listed with a reconstructed path and
+   * `parseChapter` throws a descriptive error for the server-gated body
+   * instead of returning an empty chapter.
+   */
+  premiumChapterUrls?: boolean;
 };
 
 export type MadaraMetadata = {
@@ -308,7 +316,6 @@ export class MadaraPlugin implements Plugin.PluginBase {
         .get()
         .join('\n\n')
         .trim();
-    const chapters: Plugin.ChapterItem[] = [];
     let html = '';
 
     if (this.options?.useNewChapterEndpoint) {
@@ -361,12 +368,17 @@ export class MadaraPlugin implements Plugin.PluginBase {
     }
 
     const totalChapters = loadedCheerio('.wp-manga-chapter').length;
+    const chapterItems: {
+      item: Plugin.ChapterItem;
+      premium: boolean;
+      id: string;
+      dropped?: boolean;
+    }[] = [];
+
     loadedCheerio('.wp-manga-chapter').each((chapterIndex, element) => {
-      let chapterName = loadedCheerio(element).find('a').text().trim();
+      const anchorText = loadedCheerio(element).find('a').text().trim();
       const locked = element.attribs['class'].includes('premium-block');
-      if (locked) {
-        chapterName = '🔒 ' + chapterName;
-      }
+      const chapterName = locked ? '🔒 ' + anchorText : anchorText;
 
       let releaseDate = loadedCheerio(element)
         .find('span.chapter-release-date')
@@ -380,23 +392,140 @@ export class MadaraPlugin implements Plugin.PluginBase {
       }
 
       const chapterUrl = loadedCheerio(element).find('a').attr('href') || '';
+      const premiumPath =
+        locked && this.options?.premiumChapterUrls && chapterUrl === '#'
+          ? this.parsePremiumChapterPath(novelPath, anchorText)
+          : '';
+      const chapterPath =
+        premiumPath || chapterUrl.replace(/https?:\/\/.*?\//, '');
 
-      if (chapterUrl && chapterUrl != '#' && !(locked && this.hideLocked)) {
-        chapters.push({
-          name: chapterName,
-          path: chapterUrl.replace(/https?:\/\/.*?\//, ''),
-          releaseTime: releaseDate || null,
-          chapterNumber: totalChapters - chapterIndex,
-        });
+      if (!chapterPath || chapterPath === '#' || (locked && this.hideLocked)) {
+        return;
       }
+
+      chapterItems.push({
+        premium: Boolean(premiumPath),
+        id:
+          (element.attribs['class'].match(/data-chapter-(\d+)/) || [])[1] || '',
+        item: {
+          name: chapterName,
+          path: chapterPath,
+          // The site's countdown/TBA text is not a publication date; parseData
+          // would turn "Unlocked in 4 weeks" into a past date.
+          releaseTime: premiumPath ? null : releaseDate || null,
+          chapterNumber: totalChapters - chapterIndex,
+        },
+      });
     });
 
-    novel.chapters = chapters.reverse();
+    // A reconstructed premium URL can collide with another row: the site has a
+    // duplicated chapter number, and a free row could in principle own the same
+    // slug. Resolve only those ambiguous rows by fetching the URL once and
+    // keeping it only when the page is that row's own chapter post, so a
+    // derived URL can never be listed as a different chapter.
+    const derivedPaths = new Map<string, number>();
+    for (const entry of chapterItems) {
+      if (entry.premium) {
+        derivedPaths.set(
+          entry.item.path,
+          (derivedPaths.get(entry.item.path) || 0) + 1,
+        );
+      }
+    }
+    const realPaths = new Set(
+      chapterItems
+        .filter(entry => !entry.premium)
+        .map(entry => entry.item.path),
+    );
+    for (const entry of chapterItems) {
+      if (
+        !entry.premium ||
+        ((derivedPaths.get(entry.item.path) || 0) < 2 &&
+          !realPaths.has(entry.item.path))
+      ) {
+        continue;
+      }
+      const pageId = await this.fetchChapterPostId(this.site + entry.item.path);
+      if (pageId && entry.id && pageId !== entry.id) {
+        entry.dropped = true;
+      }
+    }
+
+    novel.chapters = chapterItems
+      .filter(entry => !entry.dropped)
+      .map(entry => entry.item)
+      .reverse();
     return novel;
+  }
+
+  /**
+   * Premium rows link to `#`; the site still serves them at the regular
+   * `chapter-<n>` URL. The number is the first one in the row's anchor text.
+   * The site's own slugs keep a non-ASCII token that directly follows the
+   * number (`Chapter 176 🔞` -> `chapter-176-%f0%9f%94%9e`) but drop a
+   * ` - <title>` suffix (`Chapter 242 - 🔞` -> `chapter-242`), so only a token
+   * without a leading dash is appended. Returns '' when the row has no number,
+   * so the row is skipped rather than listed with a guessed URL.
+   */
+  parsePremiumChapterPath(novelPath: string, anchorText: string): string {
+    const seriesPath = novelPath.replace(/^\/+|\/+$/g, '');
+    const match = anchorText.match(/^chapter\s*(\d+(?:[._-]\d+)*)\s*(.*)$/i);
+    if (!match || !seriesPath) return '';
+
+    const chapterNumber = match[1].replace(/[._]/g, '-');
+    const token = (match[2] || '').trim().split(/\s+/)[0] || '';
+    const suffix =
+      token && !/^[-–—]/.test(token) && /[^\u0020-\u007e]/.test(token)
+        ? '-' + encodeURIComponent(token).toLowerCase()
+        : '';
+
+    return `${seriesPath}/chapter-${chapterNumber}${suffix}/`;
+  }
+
+  /** Best-effort chapter post id of a chapter page, '' when there is none. */
+  async fetchChapterPostId(url: string): Promise<string> {
+    try {
+      const res = await fetchApi(url);
+      const html = await res.text();
+      return (
+        html.match(/id="wp-manga-current-chap"[^>]*data-id="(\d+)"/)?.[1] || ''
+      );
+    } catch {
+      return '';
+    }
   }
 
   async parseChapter(chapterPath: string): Promise<string> {
     const loadedCheerio = await this.getCheerio(this.site + chapterPath, false);
+
+    if (this.options?.premiumChapterUrls) {
+      const readingContent = loadedCheerio('.reading-content');
+      if (
+        readingContent.length === 0 ||
+        loadedCheerio('#wp-manga-current-chap').length === 0
+      ) {
+        throw new Error(
+          `Chapter content unavailable: ${this.site + chapterPath} did not return a chapter page (this source may not have a chapter at that URL).`,
+        );
+      }
+      const lockedBlock = loadedCheerio(
+        '.reading-content .content-blocked, .reading-content .premium-block',
+      );
+      const isLocked =
+        lockedBlock.length > 0 ||
+        /this chapter is locked/i.test(readingContent.text());
+      if (isLocked) {
+        const coinPrice = (lockedBlock.attr('class') || '').match(
+          /\bcoin-(\d+)\b/,
+        )?.[1];
+        throw new Error(
+          coinPrice
+            ? `Premium chapter locked: costs ${coinPrice} coins and requires a site account to unlock.`
+            : 'Premium chapter locked: requires a site account and coins to unlock.',
+        );
+      }
+    }
+
     const chapterText =
       loadedCheerio('.text-left') ||
       loadedCheerio('.text-right') ||
@@ -412,7 +541,13 @@ export class MadaraPlugin implements Plugin.PluginBase {
       }
     }
 
-    return this.translateDragontea(chapterText).html() || '';
+    const chapterHtml = this.translateDragontea(chapterText).html() || '';
+    if (this.options?.premiumChapterUrls && !chapterHtml.trim()) {
+      throw new Error(
+        'Chapter content unavailable: the chapter page has no readable text.',
+      );
+    }
+    return chapterHtml;
   }
 
   async searchNovels(
