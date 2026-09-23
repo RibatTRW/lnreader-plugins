@@ -26,6 +26,13 @@ To add a new source you need to add it to sources.json:
   - versionIncrements: needs to be updated everytime the site url is updated
   - customJS: custom javascript that will be excuted when getting the text (if
     the site has a custom copyright that need to be removed)
+  - listLockedChapters: list coin-locked chapters even though their rows carry
+    href="#", deriving the URL from the chapter number in the row title
+    ("<novelPath>chapter-<n>/") and verifying it against the chapter page's own
+    post id before the row is listed. parseChapter then reports locked or
+    unavailable chapters instead of returning an empty chapter. Only for sources
+    that serve locked chapters at a guessable URL and render a lock notice in
+    place of the body
 
 ### icon
 
