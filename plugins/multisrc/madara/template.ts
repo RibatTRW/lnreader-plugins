@@ -412,12 +412,20 @@ export class MadaraPlugin implements Plugin.PluginBase {
   }
 
   getLockedChapterUrl(novelPath: string, chapterName: string): string {
-    const chapterNumber =
-      chapterName.match(/(?:chapter|ch\.?)\s*(\d+(?:\.\d+)?)/i)?.[1] ||
-      chapterName.match(/(\d+(?:\.\d+)?)/)?.[1];
-    if (!chapterNumber) return '';
+    const match = chapterName.match(
+      /(?:chapter|ch\.?)\s*(\d+(?:\.\d+)?)(?:\s+(\S+))?/i,
+    );
+    if (!match) return '';
+    // "Chapter 27.2" is served as chapter-27-2. A non-ASCII token straight
+    // after the number ("Chapter 176 \ud83d\udd1e") is part of the site's slug
+    // (chapter-176-%F0%9F%94%9E), while " - subtitle" is not (chapter-176).
+    const number = match[1].replace('.', '-');
+    const suffix =
+      match[2] && match[2].charCodeAt(0) > 0x7f
+        ? '-' + encodeURIComponent(match[2])
+        : '';
     const path = novelPath.endsWith('/') ? novelPath : novelPath + '/';
-    return path + 'chapter-' + chapterNumber.replace('.', '-') + '/';
+    return path + 'chapter-' + number + suffix + '/';
   }
 
   async parseChapter(chapterPath: string): Promise<string> {
