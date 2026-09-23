@@ -369,20 +369,15 @@ export class MadaraPlugin implements Plugin.PluginBase {
     const totalChapters = loadedCheerio('.wp-manga-chapter').length;
     const lockedChapterPlaceholder =
       this.options?.lockedChapterPlaceholder === true;
-    // Locked rows link to "#"; rebuild their URL from the chapter number, using
-    // the same pattern as the free rows of the list.
+    // Locked rows link to "#"; rebuild their URL from the chapter title, on the
+    // same URL base the free rows of the list use.
     const freeChapterUrl =
       loadedCheerio('.wp-manga-chapter:not(.premium-block) a[href]')
         .first()
         .attr('href') || '';
-    const lockedChapterUrl = (chapterNumber: string) =>
-      freeChapterUrl
-        ? freeChapterUrl.replace(/\d+\/?$/, chapterNumber + '/')
-        : this.site +
-          novelPath.replace(/\/?$/, '/') +
-          'chapter-' +
-          chapterNumber +
-          '/';
+    const lockedChapterBase = freeChapterUrl
+      ? freeChapterUrl.replace(/[^/]+\/?$/, '')
+      : this.site + novelPath.replace(/\/?$/, '/');
 
     loadedCheerio('.wp-manga-chapter').each((chapterIndex, element) => {
       const listedChapterName = loadedCheerio(element).find('a').text().trim();
@@ -397,7 +392,11 @@ export class MadaraPlugin implements Plugin.PluginBase {
         .text()
         .trim();
 
-      if (releaseDate) {
+      if (locked && lockedChapterPlaceholder) {
+        // A locked row's text is its unlock state ("Unlocked in 4 weeks" /
+        // "TBA"), not a release date - the app would show "Invalid Date".
+        releaseDate = '';
+      } else if (releaseDate) {
         releaseDate = this.parseData(releaseDate);
       } else {
         releaseDate = dayjs().format('LL');
@@ -409,11 +408,8 @@ export class MadaraPlugin implements Plugin.PluginBase {
         locked &&
         lockedChapterPlaceholder
       ) {
-        // Only rebuild titles that are exactly "Chapter <n>", so a guessed URL
-        // can never point at a different chapter.
-        const chapterNumber =
-          listedChapterName.match(/^chapter\s*(\d+)$/i)?.[1];
-        if (chapterNumber) chapterUrl = lockedChapterUrl(chapterNumber);
+        const chapterSlug = this.chapterSlugFromTitle(listedChapterName);
+        if (chapterSlug) chapterUrl = lockedChapterBase + chapterSlug + '/';
       }
 
       if (chapterUrl && chapterUrl != '#' && !(locked && this.hideLocked)) {
@@ -428,6 +424,25 @@ export class MadaraPlugin implements Plugin.PluginBase {
 
     novel.chapters = chapters.reverse();
     return novel;
+  }
+
+  /**
+   * Slug a locked row's title the way Tangerine Archive does: the leading
+   * number (dots become dashes) plus a token glued straight onto it when that
+   * token is not a " - " title suffix. Checked against the real hrefs of 1509
+   * free rows: 1508 exact, the one miss being a WordPress duplicate-slug "_1".
+   */
+  chapterSlugFromTitle(title: string): string | null {
+    const match = title.match(/^chapter\s*([\d.]+)(.*)$/i);
+    if (!match) return null;
+
+    const slug = 'chapter-' + match[1].replace(/\./g, '-');
+    const rest = match[2].trim();
+    const gluedToken =
+      rest && !/^[-\u2013\u2014]/.test(rest) && rest.charCodeAt(0) > 127;
+    return gluedToken
+      ? slug + '-' + encodeURIComponent(rest.split(/\s+/)[0])
+      : slug;
   }
 
   async parseChapter(chapterPath: string): Promise<string> {
@@ -472,7 +487,27 @@ export class MadaraPlugin implements Plugin.PluginBase {
     const lockedBlock = loadedCheerio(
       '.reading-content .content-blocked, .reading-content .premium-block',
     ).first();
-    if (lockedBlock.length === 0) return null;
+    if (lockedBlock.length === 0) {
+      // A derived URL that the site does not serve as a chapter (it falls back
+      // to the series page, or the slug was renamed) must not come back blank.
+      if (
+        loadedCheerio('.reading-content, .text-left, .text-right').length === 0
+      ) {
+        return `<div class="lnreader-locked-chapter"><p><b>This chapter's page could not be found on ${this.name}.</b></p><p>The site does not serve a chapter at this address, so there is nothing to show here.</p></div>`;
+      }
+      return null;
+    }
+
+    // An entitled reader (or a chapter whose early-access window just ended) is
+    // served the real body next to the coin block, which stays in the markup -
+    // never mask real prose with the notice.
+    const readableBody = loadedCheerio(
+      '.reading-content .text-left, .reading-content .text-right',
+    ).clone();
+    readableBody.find('.content-blocked, .premium-block').remove();
+    const readableText = readableBody.text().trim();
+    if (readableText.length > 0 && readableText !== lockedBlock.text().trim())
+      return null;
 
     const chapterTitle =
       loadedCheerio('#chapter-heading').text().trim() ||
