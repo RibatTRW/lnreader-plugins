@@ -18,6 +18,18 @@ type MadaraOptions = {
   versionIncrements?: number;
   customJs?: string;
   hasLocked?: boolean;
+  includeLockedChapters?: boolean;
+};
+
+/**
+ * A coin-locked chapter the listing links as `#`, remembered by the path this
+ * plugin rebuilt for it so `parseChapter` can tell whether the fetched page
+ * really is the chapter the URL claims to be.
+ */
+type RebuiltLockedChapter = {
+  rows: { id: string | null; name: string }[];
+  coins: string | null;
+  unlock: string | null;
 };
 
 export type MadaraMetadata = {
@@ -39,6 +51,13 @@ export class MadaraPlugin implements Plugin.PluginBase {
 
   hideLocked = storage.get('hideLocked');
   pluginSettings?: Filters;
+
+  /**
+   * Rebuilt coin-locked chapters from the last `parseNovel`, keyed by their
+   * normalized path. Best-effort: it only exists after `parseNovel` has run in
+   * this session, and is never required to detect a locked page.
+   */
+  rebuiltLockedChapters = new Map<string, RebuiltLockedChapter>();
 
   constructor(metadata: MadaraMetadata) {
     this.id = metadata.id;
@@ -379,12 +398,39 @@ export class MadaraPlugin implements Plugin.PluginBase {
         releaseDate = dayjs().format('LL');
       }
 
-      const chapterUrl = loadedCheerio(element).find('a').attr('href') || '';
+      let chapterUrl = loadedCheerio(element).find('a').attr('href') || '';
+
+      // Coin-locked chapters link to "#" because their body is gated
+      // server-side, but the site still serves them at the same
+      // /chapter-<number>/ path as free chapters, so rebuild that path from
+      // the chapter number to keep them in the list.
+      const rebuiltLocked =
+        locked &&
+        this.options?.includeLockedChapters &&
+        (!chapterUrl || chapterUrl == '#');
+      const unlockText = rebuiltLocked
+        ? loadedCheerio(element).find('span.chapter-release-date').text().trim()
+        : '';
+      if (rebuiltLocked) {
+        chapterUrl = this.getLockedChapterPath(novelPath, chapterName);
+        // The row only shows a countdown ("Unlocked in N weeks") or "TBA",
+        // never a publication date, so report no release time.
+        releaseDate = '';
+      }
 
       if (chapterUrl && chapterUrl != '#' && !(locked && this.hideLocked)) {
+        const path = chapterUrl.replace(/https?:\/\/.*?\//, '');
+        if (rebuiltLocked) {
+          this.rememberLockedChapter(
+            path,
+            element.attribs['class'] || '',
+            chapterName,
+            unlockText,
+          );
+        }
         chapters.push({
           name: chapterName,
-          path: chapterUrl.replace(/https?:\/\/.*?\//, ''),
+          path,
           releaseTime: releaseDate || null,
           chapterNumber: totalChapters - chapterIndex,
         });
@@ -395,8 +441,142 @@ export class MadaraPlugin implements Plugin.PluginBase {
     return novel;
   }
 
+  /**
+   * Locked chapters are linked as `#`, but their permalink is derivable from
+   * the novel path and the number the listing shows: `chapter-<n>/`.
+   *
+   * The listing's anchor text is not uniform: `Chapter 250  - (End of the Side
+   * Stories)` and `Chapter 239 - SS-IV. (AU)` drop the title suffix, `Chapter
+   * 27.2` becomes `chapter-27-2`, while a non-ASCII token directly after the
+   * number (`Chapter 176 🔞`) is part of the site's own slug and must be
+   * kept (`chapter-176-%F0%9F%94%9E`). A ` - ` separator means title, not slug.
+   */
+  getLockedChapterPath(novelPath: string, chapterName: string): string {
+    const name = chapterName.replace(/^🔒\s*/, '');
+    const match = name.match(/^(?:chapter|ch\.?)\s*(\d+(?:\.\d+)?)([\s\S]*)$/i);
+    if (!match) return '';
+    const number = match[1].replace('.', '-');
+    const token = (match[2] || '').trim().split(/\s+/)[0] || '';
+    const suffix =
+      token && token.charCodeAt(0) > 0x7f
+        ? '-' + encodeURIComponent(token)
+        : '';
+    const path = novelPath.endsWith('/') ? novelPath : novelPath + '/';
+    return path + 'chapter-' + number + suffix + '/';
+  }
+
+  /**
+   * Paths are compared without a scheme/host, query, fragment or trailing
+   * slash so `parseNovel` and `parseChapter` agree on the same key.
+   */
+  chapterKey(path: string): string {
+    const clean = path
+      .replace(/^https?:\/\/[^/]+\//, '')
+      .replace(/[?#].*$/, '')
+      .replace(/^\/+|\/+$/g, '');
+    try {
+      return decodeURI(clean).toLowerCase();
+    } catch (error) {
+      return clean.toLowerCase();
+    }
+  }
+
+  /**
+   * Keeps the listing details `parseChapter` cannot see on a locked page: the
+   * chapter's own post id (to detect a derived URL that lands on a different
+   * chapter) and the unlock countdown, which only exists in the listing row.
+   */
+  rememberLockedChapter(
+    path: string,
+    className: string,
+    chapterName: string,
+    unlockText: string,
+  ) {
+    if (!path) return;
+    const key = this.chapterKey(path);
+    const entry = this.rebuiltLockedChapters.get(key) || {
+      rows: [],
+      coins: null,
+      unlock: null,
+    };
+    entry.rows.push({
+      id: className.match(/data-chapter-(\d+)/)?.[1] || null,
+      name: chapterName,
+    });
+    entry.coins = entry.coins || className.match(/coin-(\d+)/)?.[1] || null;
+    if (!entry.unlock && unlockText) {
+      const countdown = unlockText.match(/unlock(?:ed|s)?\s+in\s+(.+)/i);
+      if (countdown)
+        entry.unlock = `it unlocks for free in ${countdown[1].trim()}`;
+      else if (/^tba$/i.test(unlockText))
+        entry.unlock = 'its free-unlock date is TBA';
+    }
+    this.rebuiltLockedChapters.set(key, entry);
+  }
+
   async parseChapter(chapterPath: string): Promise<string> {
     const loadedCheerio = await this.getCheerio(this.site + chapterPath, false);
+
+    if (this.options?.includeLockedChapters) {
+      const readingContent = loadedCheerio('.reading-content');
+      const currentChapter = loadedCheerio('#wp-manga-current-chap');
+      const pageId = currentChapter.attr('data-id') || '';
+      const rebuilt = this.rebuiltLockedChapters.get(
+        this.chapterKey(chapterPath),
+      );
+
+      // A rebuilt locked URL can land on the series page when the chapter's
+      // slug does not match its number. Never return blank content for it.
+      if (readingContent.length === 0 || currentChapter.length === 0) {
+        throw new Error(
+          `Could not load this chapter: ${this.site}${chapterPath} did not return a chapter page. If it is a locked chapter, the source may keep it under a different URL; open it from the series page on the site.`,
+        );
+      }
+
+      // Two chapters can share a number (the source keeps one of them under a
+      // suffixed slug), in which case the derived URL serves the other one.
+      // Say so instead of presenting the wrong chapter as this one.
+      if (rebuilt && pageId && rebuilt.rows.length > 0) {
+        const match = rebuilt.rows.find(row => row.id === pageId);
+        if (!match) {
+          const actual =
+            rebuilt.rows.length === 1 ? rebuilt.rows[0].name : null;
+          throw new Error(
+            `This URL resolves to a different chapter${actual ? ` (${actual})` : ''} on ${this.name}, not to the chapter it was listed as. The source serves both under the same number; unlock it from the series page on the site.`,
+          );
+        }
+      }
+
+      const lockNotice = readingContent
+        .find('.content-blocked, .premium-block')
+        .first();
+      if (
+        lockNotice.length > 0 ||
+        /chapter is locked/i.test(readingContent.text())
+      ) {
+        const pageCoins = (lockNotice.attr('class') || '').match(
+          /coin-(\d+)/,
+        )?.[1];
+        const coins = pageCoins || rebuilt?.coins;
+        const details = [
+          coins ? `it costs ${coins} coins` : null,
+          rebuilt?.unlock || null,
+        ].filter(Boolean);
+        // When two listed chapters share a number the source serves this URL
+        // for exactly one of them; name it so the notice is not misleading.
+        const servedAs =
+          rebuilt && rebuilt.rows.length > 1 && pageId
+            ? rebuilt.rows.find(row => row.id === pageId)?.name
+            : null;
+        throw new Error(
+          `This chapter is locked on ${this.name}${
+            details.length ? `: ${details.join(', ')}` : ''
+          }${
+            servedAs ? ` (the source serves this URL as "${servedAs}")` : ''
+          }. Its text is only available after unlocking it with a site account.`,
+        );
+      }
+    }
     const chapterText =
       loadedCheerio('.text-left') ||
       loadedCheerio('.text-right') ||

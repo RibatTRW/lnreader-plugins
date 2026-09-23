@@ -23,6 +23,14 @@ To add a new source you need to add it to sources.json:
   - lang: the language of the source (default: "English") (check that the language
     exists in the languages (check folder names in "plugins/"))
   - useNewChapterEndpoint: if the source uses the new chapter endpoint
+  - includeLockedChapters: if the source links coin-locked chapters as `#` but
+    serves them at the same `/chapter-<number>/` path as free chapters, list
+    them with that rebuilt path and make `parseChapter` report a clear locked
+    error instead of an empty chapter. Off by default; only enable it for
+    sources that gate chapters this way (tangerinearchive).
+  - hasLocked: show the "Hide locked chapters" switch in the app. Use it
+    together with includeLockedChapters so readers can filter the locked rows
+    out again.
   - versionIncrements: needs to be updated everytime the site url is updated
   - customJS: custom javascript that will be excuted when getting the text (if
     the site has a custom copyright that need to be removed)
