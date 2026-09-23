@@ -676,5 +676,14 @@
     "options": {
       "useNewChapterEndpoint": true
     }
+  },
+  {
+    "id": "tangerinearchive",
+    "sourceSite": "https://tangerinearchive.com/",
+    "sourceName": "Tangerine Archive",
+    "options": {
+      "lang": "English",
+      "useNewChapterEndpoint": true
+    }
   }
 ]
