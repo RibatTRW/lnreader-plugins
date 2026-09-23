@@ -683,7 +683,9 @@
     "sourceName": "Tangerine Archive",
     "options": {
       "lang": "English",
-      "useNewChapterEndpoint": true
+      "useNewChapterEndpoint": true,
+      "includeLockedChapters": true,
+      "versionIncrements": 1
     }
   }
 ]

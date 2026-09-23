@@ -18,6 +18,7 @@ type MadaraOptions = {
   versionIncrements?: number;
   customJs?: string;
   hasLocked?: boolean;
+  includeLockedChapters?: boolean;
 };
 
 export type MadaraMetadata = {
@@ -379,7 +380,22 @@ export class MadaraPlugin implements Plugin.PluginBase {
         releaseDate = dayjs().format('LL');
       }
 
-      const chapterUrl = loadedCheerio(element).find('a').attr('href') || '';
+      let chapterUrl = loadedCheerio(element).find('a').attr('href') || '';
+
+      // Coin-locked chapters link to "#" because their body is gated
+      // server-side, but the site still serves them at the same
+      // /chapter-<number>/ path as free chapters, so rebuild that path from
+      // the chapter number to keep them in the list.
+      const rebuiltLockedChapter =
+        locked &&
+        this.options?.includeLockedChapters &&
+        (!chapterUrl || chapterUrl == '#');
+      if (rebuiltLockedChapter) {
+        chapterUrl = this.getLockedChapterUrl(novelPath, chapterName);
+        // The row only shows a countdown ("Unlocked in N weeks") or "TBA",
+        // never a publication date, so report no release time.
+        releaseDate = '';
+      }
 
       if (chapterUrl && chapterUrl != '#' && !(locked && this.hideLocked)) {
         chapters.push({
@@ -395,8 +411,43 @@ export class MadaraPlugin implements Plugin.PluginBase {
     return novel;
   }
 
+  getLockedChapterUrl(novelPath: string, chapterName: string): string {
+    const chapterNumber =
+      chapterName.match(/(?:chapter|ch\.?)\s*(\d+(?:\.\d+)?)/i)?.[1] ||
+      chapterName.match(/(\d+(?:\.\d+)?)/)?.[1];
+    if (!chapterNumber) return '';
+    const path = novelPath.endsWith('/') ? novelPath : novelPath + '/';
+    return path + 'chapter-' + chapterNumber.replace('.', '-') + '/';
+  }
+
   async parseChapter(chapterPath: string): Promise<string> {
     const loadedCheerio = await this.getCheerio(this.site + chapterPath, false);
+
+    if (this.options?.includeLockedChapters) {
+      const readingContent = loadedCheerio('.reading-content');
+      const lockNotice = readingContent
+        .find('.content-blocked, .premium-block')
+        .first();
+      if (
+        lockNotice.length > 0 ||
+        /chapter is locked/i.test(readingContent.text())
+      ) {
+        const coins = (lockNotice.attr('class') || '').match(/coin-(\d+)/)?.[1];
+        throw new Error(
+          `This chapter is locked${
+            coins ? ` and costs ${coins} coins` : ''
+          }. Unlock it with a site account to read it here.`,
+        );
+      }
+      // A rebuilt locked URL can land on the series page when the chapter slug
+      // does not match its number. Never return blank content for it.
+      if (readingContent.length === 0) {
+        throw new Error(
+          'Could not load this chapter: the page has no readable content. It may have been removed, moved, or be premium only.',
+        );
+      }
+    }
+
     const chapterText =
       loadedCheerio('.text-left') ||
       loadedCheerio('.text-right') ||
