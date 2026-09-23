@@ -424,6 +424,11 @@ export class MadaraPlugin implements Plugin.PluginBase {
     const loadedCheerio = await this.getCheerio(this.site + chapterPath, false);
 
     if (this.options?.premiumChapterUrls) {
+      if (loadedCheerio('.reading-content').length === 0) {
+        throw new Error(
+          'Chapter content unavailable: the page has no readable body (the URL may not point to a chapter).',
+        );
+      }
       const lockedBlock = loadedCheerio(
         '.reading-content .content-blocked, .reading-content .premium-block',
       );
@@ -459,7 +464,13 @@ export class MadaraPlugin implements Plugin.PluginBase {
       }
     }
 
-    return this.translateDragontea(chapterText).html() || '';
+    const chapterHtml = this.translateDragontea(chapterText).html() || '';
+    if (this.options?.premiumChapterUrls && !chapterHtml.trim()) {
+      throw new Error(
+        'Chapter content unavailable: no readable text found on the page.',
+      );
+    }
+    return chapterHtml;
   }
 
   async searchNovels(
