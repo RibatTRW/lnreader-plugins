@@ -18,6 +18,7 @@ type MadaraOptions = {
   versionIncrements?: number;
   customJs?: string;
   hasLocked?: boolean;
+  listLockedChapters?: boolean;
 };
 
 export type MadaraMetadata = {
@@ -362,24 +363,64 @@ export class MadaraPlugin implements Plugin.PluginBase {
 
     const totalChapters = loadedCheerio('.wp-manga-chapter').length;
     loadedCheerio('.wp-manga-chapter').each((chapterIndex, element) => {
-      let chapterName = loadedCheerio(element).find('a').text().trim();
+      const chapterLink = loadedCheerio(element).find('a');
+      let chapterName = chapterLink.text().trim();
       const locked = element.attribs['class'].includes('premium-block');
       if (locked) {
         chapterName = '🔒 ' + chapterName;
       }
 
-      let releaseDate = loadedCheerio(element)
+      const releaseText = loadedCheerio(element)
         .find('span.chapter-release-date')
         .text()
         .trim();
 
-      if (releaseDate) {
-        releaseDate = this.parseData(releaseDate);
-      } else {
-        releaseDate = dayjs().format('LL');
+      let releaseDate: string | null = releaseText
+        ? this.parseData(releaseText)
+        : dayjs().format('LL');
+
+      // Locked rows count down to becoming free ("Unlocked in 4 weeks") or
+      // say "TBA" instead of carrying a past release date, so parseData's
+      // backwards subtraction would claim a date in the past. Only sources
+      // that opt in to listing their locked chapters take this path.
+      if (locked && this.options?.listLockedChapters) {
+        releaseDate = this.parseUnlockCountdown(releaseText);
       }
 
-      const chapterUrl = loadedCheerio(element).find('a').attr('href') || '';
+      let chapterUrl = chapterLink.attr('href') || '';
+
+      // Coin-locked rows link to "#" because their body is server-gated
+      // behind login + coins. Rebuild their canonical /chapter-<n>/ URL so
+      // they stay in the listing and the reader's prev/next steps through
+      // them instead of silently skipping them.
+      if (
+        locked &&
+        this.options?.listLockedChapters &&
+        (!chapterUrl || chapterUrl === '#')
+      ) {
+        const chapterText = chapterLink.text().trim();
+        const chapterNumber = chapterText.match(
+          /chapter\s*([0-9]+(?:\.[0-9]+)?)/i,
+        );
+        if (chapterNumber) {
+          // A non-ASCII token right after the number belongs to the post slug
+          // ("Chapter 176 🔞" -> chapter-176-🔞), while a " - title" suffix
+          // does not ("Chapter 242 - 🔞" -> chapter-242). Verified against the
+          // real hrefs of 1036 free rows on the live site.
+          const rest = chapterText
+            .slice((chapterNumber.index || 0) + chapterNumber[0].length)
+            .replace(/^\s+/, '');
+          const codePoint = rest.codePointAt(0);
+          const suffix =
+            codePoint && codePoint > 0x7f
+              ? '-' + encodeURIComponent(String.fromCodePoint(codePoint))
+              : '';
+          chapterUrl = `${this.site}${novelPath.replace(
+            /\/?$/,
+            '/',
+          )}chapter-${chapterNumber[1].replace('.', '-')}${suffix}/`;
+        }
+      }
 
       if (chapterUrl && chapterUrl != '#' && !(locked && this.hideLocked)) {
         chapters.push({
@@ -395,8 +436,108 @@ export class MadaraPlugin implements Plugin.PluginBase {
     return novel;
   }
 
+  /**
+   * Locked rows show an unlock countdown ("Unlocked in 4 weeks") or "TBA"
+   * instead of a release date. Convert the countdown to the future date it
+   * names, and claim no date at all for "TBA". "LL" is deliberately not
+   * used here: it only renders as a month name with the dayjs localizedFormat
+   * plugin loaded, so it would be an unreadable string in the app.
+   */
+  parseUnlockCountdown(countdown: string): string | null {
+    const match = countdown.match(/(\d+)\s*(day|week|month|year)/i);
+    if (!match) return null;
+
+    const amount = parseInt(match[1], 10);
+    const unit = match[2].toLowerCase();
+
+    if (unit.startsWith('day'))
+      return dayjs().add(amount, 'day').format('YYYY-MM-DD');
+    if (unit.startsWith('week'))
+      return dayjs().add(amount, 'week').format('YYYY-MM-DD');
+    if (unit.startsWith('month'))
+      return dayjs().add(amount, 'month').format('YYYY-MM-DD');
+    return dayjs().add(amount, 'year').format('YYYY-MM-DD');
+  }
+
+  /**
+   * Read a locked chapter's unlock countdown from the series chapter list,
+   * which is where the site renders "Unlocked in N weeks" / "TBA".
+   */
+  async fetchUnlockText(
+    chapterPath: string,
+    chapterId: string,
+  ): Promise<string | null> {
+    const seriesPath = chapterPath.replace(/chapter-[^/]+\/?$/i, '');
+    if (!seriesPath || seriesPath === chapterPath) return null;
+
+    try {
+      const html = await fetchApi(this.site + seriesPath + 'ajax/chapters/', {
+        method: 'POST',
+        referrer: this.site + seriesPath,
+      }).then((res: Response) => res.text());
+      const row = parseHTML(html)(
+        `.wp-manga-chapter[class~="data-chapter-${chapterId}"]`,
+      ).first();
+      return row.find('span.chapter-release-date').text().trim() || null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Coin-locked chapter pages answer HTTP 200 but replace the body with a
+   * lock notice. Return an honest locked-chapter message (price and unlock
+   * schedule when the site exposes them) instead of the empty string the
+   * normal content selectors would return.
+   */
+  async parseLockedChapter(
+    loadedCheerio: CheerioAPI,
+    chapterPath: string,
+  ): Promise<string | null> {
+    const blocked = loadedCheerio('.reading-content .content-blocked');
+    if (blocked.length === 0) return null;
+
+    const price = blocked
+      .first()
+      .attr('class')
+      ?.match(/coin-(\d+)/)?.[1];
+
+    const chapterId = loadedCheerio('#wp-manga-current-chap').attr('data-id');
+    const unlockText =
+      chapterId && /^\d+$/.test(chapterId)
+        ? await this.fetchUnlockText(chapterPath, chapterId)
+        : null;
+
+    let notice = `<p>🔒 This chapter is locked on ${this.name}.</p>`;
+    if (price) {
+      notice += `<p>It costs ${price} coins to unlock.</p>`;
+    }
+    if (unlockText) {
+      notice += `<p>${
+        /^tba$/i.test(unlockText) ? 'Unlock date: TBA.' : unlockText + '.'
+      }</p>`;
+    }
+    return notice;
+  }
+
   async parseChapter(chapterPath: string): Promise<string> {
     const loadedCheerio = await this.getCheerio(this.site + chapterPath, false);
+
+    if (this.options?.listLockedChapters) {
+      const lockedNotice = await this.parseLockedChapter(
+        loadedCheerio,
+        chapterPath,
+      );
+      if (lockedNotice) return lockedNotice;
+
+      // A reconstructed URL lands on the series page when the chapter's real
+      // slug is not /chapter-<n>/ (duplicate chapter numbers, emoji suffixes).
+      // Without this guard parseChapter would come back empty for such rows.
+      if (loadedCheerio('.reading-content').length === 0) {
+        return `<p>🔒 This chapter could not be loaded from ${this.name}.</p><p>The site has no readable page at this address - it may be locked, renamed, or moved. Open the chapter on ${this.name} to check it.</p>`;
+      }
+    }
+
     const chapterText =
       loadedCheerio('.text-left') ||
       loadedCheerio('.text-right') ||
