@@ -18,6 +18,12 @@ type MadaraOptions = {
   versionIncrements?: number;
   customJs?: string;
   hasLocked?: boolean;
+  /**
+   * Sources that list coin-locked chapters with href="#" (Tangerine Archive).
+   * Rebuilds their URL from the chapter number and returns a readable
+   * lock notice instead of an empty chapter. Needs useNewChapterEndpoint.
+   */
+  lockedChapterPlaceholder?: boolean;
 };
 
 export type MadaraMetadata = {
@@ -361,8 +367,26 @@ export class MadaraPlugin implements Plugin.PluginBase {
     }
 
     const totalChapters = loadedCheerio('.wp-manga-chapter').length;
+    const lockedChapterPlaceholder =
+      this.options?.lockedChapterPlaceholder === true;
+    // Locked rows link to "#"; rebuild their URL from the chapter number, using
+    // the same pattern as the free rows of the list.
+    const freeChapterUrl =
+      loadedCheerio('.wp-manga-chapter:not(.premium-block) a[href]')
+        .first()
+        .attr('href') || '';
+    const lockedChapterUrl = (chapterNumber: string) =>
+      freeChapterUrl
+        ? freeChapterUrl.replace(/\d+\/?$/, chapterNumber + '/')
+        : this.site +
+          novelPath.replace(/\/?$/, '/') +
+          'chapter-' +
+          chapterNumber +
+          '/';
+
     loadedCheerio('.wp-manga-chapter').each((chapterIndex, element) => {
-      let chapterName = loadedCheerio(element).find('a').text().trim();
+      const listedChapterName = loadedCheerio(element).find('a').text().trim();
+      let chapterName = listedChapterName;
       const locked = element.attribs['class'].includes('premium-block');
       if (locked) {
         chapterName = '🔒 ' + chapterName;
@@ -379,7 +403,18 @@ export class MadaraPlugin implements Plugin.PluginBase {
         releaseDate = dayjs().format('LL');
       }
 
-      const chapterUrl = loadedCheerio(element).find('a').attr('href') || '';
+      let chapterUrl = loadedCheerio(element).find('a').attr('href') || '';
+      if (
+        (!chapterUrl || chapterUrl == '#') &&
+        locked &&
+        lockedChapterPlaceholder
+      ) {
+        // Only rebuild titles that are exactly "Chapter <n>", so a guessed URL
+        // can never point at a different chapter.
+        const chapterNumber =
+          listedChapterName.match(/^chapter\s*(\d+)$/i)?.[1];
+        if (chapterNumber) chapterUrl = lockedChapterUrl(chapterNumber);
+      }
 
       if (chapterUrl && chapterUrl != '#' && !(locked && this.hideLocked)) {
         chapters.push({
@@ -397,6 +432,15 @@ export class MadaraPlugin implements Plugin.PluginBase {
 
   async parseChapter(chapterPath: string): Promise<string> {
     const loadedCheerio = await this.getCheerio(this.site + chapterPath, false);
+
+    if (this.options?.lockedChapterPlaceholder) {
+      const lockedChapter = await this.parseLockedChapter(
+        chapterPath,
+        loadedCheerio,
+      );
+      if (lockedChapter) return lockedChapter;
+    }
+
     const chapterText =
       loadedCheerio('.text-left') ||
       loadedCheerio('.text-right') ||
@@ -413,6 +457,79 @@ export class MadaraPlugin implements Plugin.PluginBase {
     }
 
     return this.translateDragontea(chapterText).html() || '';
+  }
+
+  /**
+   * Coin-locked chapters are served without their body: the reading area only
+   * holds a "This chapter is locked!" block. Report the lock (title, price,
+   * unlock countdown) instead of returning an empty chapter. Never invents
+   * story text.
+   */
+  async parseLockedChapter(
+    chapterPath: string,
+    loadedCheerio: CheerioAPI,
+  ): Promise<string | null> {
+    const lockedBlock = loadedCheerio(
+      '.reading-content .content-blocked, .reading-content .premium-block',
+    ).first();
+    if (lockedBlock.length === 0) return null;
+
+    const chapterTitle =
+      loadedCheerio('#chapter-heading').text().trim() ||
+      loadedCheerio('.entry-title').text().trim() ||
+      'This chapter';
+
+    const details = await this.getLockedChapterDetails(
+      chapterPath.replace(/[^/]+\/?$/, ''),
+      chapterTitle.match(/\d+/)?.[0],
+    );
+    const price =
+      lockedBlock.attr('class')?.match(/coin-(\d+)/)?.[1] || details.price;
+
+    const notice = [
+      `<h3>${chapterTitle}</h3>`,
+      `<p><b>Premium chapter - locked behind ${
+        price ? `${price} coins` : "the site's coin paywall"
+      }.</b></p>`,
+      `<p>${this.name} only serves this chapter to readers who unlock it there, so its text cannot be shown here.</p>`,
+    ];
+    if (details.unlock) notice.push(`<p>Unlock status: ${details.unlock}</p>`);
+
+    return `<div class="lnreader-locked-chapter">${notice.join('')}</div>`;
+  }
+
+  /**
+   * Coin price and unlock countdown of a locked chapter, read from the series'
+   * chapter list. Best effort: the lock notice works without it.
+   */
+  async getLockedChapterDetails(
+    seriesPath: string,
+    chapterNumber?: string,
+  ): Promise<{ price?: string; unlock?: string }> {
+    if (!chapterNumber || !this.options?.useNewChapterEndpoint) return {};
+
+    try {
+      const html = await fetchApi(this.site + seriesPath + 'ajax/chapters/', {
+        method: 'POST',
+        referrer: this.site + seriesPath,
+      }).then((res: Response) => res.text());
+      const loadedCheerio = parseHTML(html);
+      let details: { price?: string; unlock?: string } = {};
+      loadedCheerio('.wp-manga-chapter.premium-block').each((_, element) => {
+        const chapter = loadedCheerio(element);
+        if (chapter.find('a').text().match(/\d+/)?.[0] !== chapterNumber)
+          return;
+        details = {
+          price: chapter.find('span.coin').text().match(/\d+/)?.[0],
+          unlock:
+            chapter.find('span.chapter-release-date').text().trim() ||
+            undefined,
+        };
+      });
+      return details;
+    } catch {
+      return {};
+    }
   }
 
   async searchNovels(
