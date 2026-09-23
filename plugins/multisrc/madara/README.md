@@ -26,6 +26,10 @@ To add a new source you need to add it to sources.json:
   - versionIncrements: needs to be updated everytime the site url is updated
   - customJS: custom javascript that will be excuted when getting the text (if
     the site has a custom copyright that need to be removed)
+  - listLockedChapters: for sites that render coin-locked chapters with
+    `href="#"` (e.g. Tangerine Archive). Lists them with the coin price and lock
+    state in the chapter name, rebuilds their `/chapter-<n>/` URL, and makes
+    `parseChapter` throw instead of returning the site's empty lock notice.
 
 ### icon
 

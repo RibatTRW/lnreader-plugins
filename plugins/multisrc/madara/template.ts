@@ -18,6 +18,7 @@ type MadaraOptions = {
   versionIncrements?: number;
   customJs?: string;
   hasLocked?: boolean;
+  listLockedChapters?: boolean;
 };
 
 export type MadaraMetadata = {
@@ -362,24 +363,45 @@ export class MadaraPlugin implements Plugin.PluginBase {
 
     const totalChapters = loadedCheerio('.wp-manga-chapter').length;
     loadedCheerio('.wp-manga-chapter').each((chapterIndex, element) => {
-      let chapterName = loadedCheerio(element).find('a').text().trim();
+      const chapterElement = loadedCheerio(element);
+      let chapterName = chapterElement.find('a').text().trim();
       const locked = element.attribs['class'].includes('premium-block');
-      if (locked) {
-        chapterName = '🔒 ' + chapterName;
-      }
+      const listLocked = locked && !!this.options?.listLockedChapters;
 
-      let releaseDate = loadedCheerio(element)
+      let releaseDate = chapterElement
         .find('span.chapter-release-date')
         .text()
         .trim();
 
-      if (releaseDate) {
-        releaseDate = this.parseData(releaseDate);
-      } else {
-        releaseDate = dayjs().format('LL');
+      let chapterUrl = chapterElement.find('a').attr('href') || '';
+
+      if (listLocked) {
+        // Coin-locked chapters are rendered with href="#"; recover the real
+        // (still server-gated) URL from the chapter number and surface the
+        // coin price plus the lock state in the chapter name.
+        const coinMatch = (element.attribs['class'] || '').match(
+          /\bcoin-(\d+)\b/,
+        );
+        const price =
+          coinMatch?.[1] || chapterElement.find('span.coin').text().trim();
+        const lockState = releaseDate.replace(/\s+/g, ' ').trim() || 'locked';
+        const chapterNumber = chapterName.match(/(\d+(?:\.\d+)?)/)?.[1];
+        if ((!chapterUrl || chapterUrl == '#') && chapterNumber) {
+          chapterUrl =
+            novelPath.replace(/\/?$/, '/') + 'chapter-' + chapterNumber + '/';
+        }
+        chapterName += ` [Premium - ${price ? price + ' coins - ' : ''}${lockState}]`;
+        // "TBA"/countdown is not a real release date; it is already in the name.
+        releaseDate = '';
+      } else if (locked) {
+        chapterName = '🔒 ' + chapterName;
       }
 
-      const chapterUrl = loadedCheerio(element).find('a').attr('href') || '';
+      if (releaseDate) {
+        releaseDate = this.parseData(releaseDate);
+      } else if (!listLocked) {
+        releaseDate = dayjs().format('LL');
+      }
 
       if (chapterUrl && chapterUrl != '#' && !(locked && this.hideLocked)) {
         chapters.push({
@@ -397,6 +419,24 @@ export class MadaraPlugin implements Plugin.PluginBase {
 
   async parseChapter(chapterPath: string): Promise<string> {
     const loadedCheerio = await this.getCheerio(this.site + chapterPath, false);
+
+    if (this.options?.listLockedChapters) {
+      // The site serves premium chapters as HTTP 200 but replaces the body with
+      // a lock notice, so fail loudly instead of returning an empty chapter.
+      const lockBlock = loadedCheerio(
+        '.reading-content .content-blocked, .reading-content .premium-block',
+      );
+      if (lockBlock.length > 0) {
+        const coinMatch = (lockBlock.attr('class') || '').match(
+          /\bcoin-(\d+)\b/,
+        );
+        const price = coinMatch ? ` (${coinMatch[1]} coins)` : '';
+        throw new Error(
+          `This chapter is locked on ${this.name}${price}. It requires a site login and a coin unlock, so its text cannot be shown here.`,
+        );
+      }
+    }
+
     const chapterText =
       loadedCheerio('.text-left') ||
       loadedCheerio('.text-right') ||
