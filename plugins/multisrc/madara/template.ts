@@ -189,6 +189,7 @@ export class MadaraPlugin implements Plugin.PluginBase {
         loadedCheerio('.post-title h1').text().trim() ||
         loadedCheerio('#manga-title h1').text().trim() ||
         loadedCheerio('.manga-title').text().trim() ||
+        loadedCheerio('h1.nhv-novel-title').text().trim() ||
         '',
     };
 
@@ -196,6 +197,9 @@ export class MadaraPlugin implements Plugin.PluginBase {
       loadedCheerio('.summary_image > a > img').attr('data-lazy-src') ||
       loadedCheerio('.summary_image > a > img').attr('data-src') ||
       loadedCheerio('.summary_image > a > img').attr('src') ||
+      loadedCheerio('.nhv-novel-cover img').attr('data-lazy-src') ||
+      loadedCheerio('.nhv-novel-cover img').attr('data-src') ||
+      loadedCheerio('.nhv-novel-cover img').attr('src') ||
       defaultCover;
 
     loadedCheerio('.post-content_item, .post-content').each(function () {
@@ -251,6 +255,36 @@ export class MadaraPlugin implements Plugin.PluginBase {
       }
     });
 
+    // Fallback for the custom "NHV" theme (e.g. cenele.com), which renders
+    // novel pages without the classic Madara detail blocks. Every field is
+    // only filled when the selectors above left it empty, so sources on the
+    // classic theme keep their existing behaviour.
+    {
+      if (!novel.author)
+        novel.author =
+          loadedCheerio('.nhv-novel-meta a[href*="cont-author"]')
+            .first()
+            .text()
+            .trim() ||
+          loadedCheerio('a[href*="cont-author"]').first().text().trim();
+      if (!novel.genres)
+        novel.genres = loadedCheerio('.nhv-novel-genres a')
+          .map((i, el) => loadedCheerio(el).text())
+          .get()
+          .join(', ');
+      const nhvStatus = loadedCheerio('.nhv-novel-status').text().trim();
+      if (!novel.status && nhvStatus)
+        novel.status = nhvStatus.includes('مستمرة')
+          ? NovelStatus.Ongoing
+          : NovelStatus.Completed;
+      if (!novel.rating) {
+        const nhvRating = parseFloat(
+          loadedCheerio('.nhv-simple-rating__avg').text().trim(),
+        );
+
+        if (!isNaN(nhvRating)) novel.rating = nhvRating;
+      }
+    }
     // Checks for "Madara NovelHub" version
     {
       if (!novel.genres)
@@ -292,6 +326,11 @@ export class MadaraPlugin implements Plugin.PluginBase {
         .join('\n\n')
         .trim() ||
       loadedCheerio('.manga-excerpt p')
+        .map((i, el) => loadedCheerio(el).text())
+        .get()
+        .join('\n\n')
+        .trim() ||
+      loadedCheerio('.nhv-novel-synopsis p')
         .map((i, el) => loadedCheerio(el).text())
         .get()
         .join('\n\n')
