@@ -8,7 +8,7 @@ class SakuraNovel implements Plugin.PluginBase {
   name = 'SakuraNovel';
   icon = 'src/id/sakuranovel/icon.png';
   site = 'https://sakuranovel.id/';
-  version = '1.0.1';
+  version = '1.0.2';
 
   parseNovels(loadedCheerio: CheerioAPI) {
     const novels: Plugin.NovelItem[] = [];
@@ -137,14 +137,25 @@ class SakuraNovel implements Plugin.PluginBase {
 
     const loadedCheerio = parseHTML(body);
 
-    const divi = loadedCheerio("div:contains('Daftar Isi') +")
-      .find('div:first')
-      .attr('class');
-    loadedCheerio(`.${divi}`).remove();
-    const chapterText =
-      loadedCheerio("div:contains('Daftar Isi') +").html() || '';
+    const contentSelectors = [
+      '.tldariinggrissendiribrojangancopy .entry-content',
+      '.entry-content',
+    ];
+    for (const selector of contentSelectors) {
+      const content = loadedCheerio(selector).first();
+      if (!content.length) continue;
+      content.find("p:contains('Baca novel lain di sakuranovel')").remove();
+      const chapterText = (content.html() || '').trim();
+      if (chapterText) return chapterText;
+    }
 
-    return chapterText;
+    let paragraphs = '';
+    loadedCheerio('p.ds-markdown-paragraph').each((i, el) => {
+      paragraphs += loadedCheerio(el).toString();
+    });
+    if (paragraphs.trim()) return paragraphs;
+
+    return loadedCheerio("div:contains('Daftar Isi') +").html() || '';
   }
 
   async searchNovels(
