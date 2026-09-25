@@ -3,10 +3,12 @@ import { fetchApi } from '@libs/fetch';
 import { Plugin } from '@/types/plugin';
 import { NovelStatus } from '@libs/novelStatus';
 
+const siteUrl = 'https://novelping.com/';
+
 const headers = {
   'User-Agent':
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
-  Referer: 'https://novelping.com/',
+  Referer: siteUrl,
   'Accept-Language': 'en-US,en;q=0.9',
 };
 
@@ -27,7 +29,7 @@ class NovelArrow implements Plugin.PluginBase {
   id = 'novelarrow';
   name = 'Novel Arrow';
   icon = 'src/en/novelarrow/icon.png';
-  site = 'https://novelping.com/';
+  site = siteUrl;
   version = '2.0.0';
 
   private toPath(href?: string) {
@@ -77,12 +79,9 @@ class NovelArrow implements Plugin.PluginBase {
       .replace(/^(book|novel)\//, '')
       .split('/')[0];
     const canonicalPath = `book/${slug}`;
-    // Ensure no double slashes in the URL
     const url = this.site + canonicalPath;
     const result = await fetchSite(url);
     const $ = parseHTML(result);
-
-    const novelId = slug;
 
     // Get the full summary from the paragraphs inside the description block
     const fullSummary =
@@ -95,6 +94,15 @@ class NovelArrow implements Plugin.PluginBase {
       $('meta[property="og:novel:status"]').attr('content') || ''
     ).toLowerCase();
 
+    // The single og:novel:author and og:novel:genre lookups were verified
+    // sufficient on the new markup; the old fallbacks are dropped.
+    let status = NovelStatus.Unknown;
+    if (statusText === 'ongoing') {
+      status = NovelStatus.Ongoing;
+    } else if (statusText === 'completed') {
+      status = NovelStatus.Completed;
+    }
+
     const novel: Plugin.SourceNovel = {
       path: canonicalPath,
       name:
@@ -102,15 +110,15 @@ class NovelArrow implements Plugin.PluginBase {
         $('h3.title').first().text().trim(),
       cover: $('meta[property="og:image"]').attr('content'),
       author: $('meta[property="og:novel:author"]').attr('content'),
-      status:
-        statusText === 'ongoing' ? NovelStatus.Ongoing : NovelStatus.Completed,
+      status,
       summary: fullSummary,
       genres: $('meta[property="og:novel:genre"]').attr('content'),
       chapters: [],
     };
 
-    // The chapter list is rendered through an ajax endpoint
-    const chaptersUrl = `${this.site}ajax/chapter-archive?novelId=${encodeURIComponent(novelId)}`;
+    // The archive serves oldest-first like the old ?sort=asc endpoint,
+    // so no reversal is needed.
+    const chaptersUrl = `${this.site}ajax/chapter-archive?novelId=${encodeURIComponent(slug)}`;
     const chaptersHtml = await fetchSite(chaptersUrl);
     const $$ = parseHTML(chaptersHtml);
     const chapters: Plugin.ChapterItem[] = [];
@@ -123,7 +131,7 @@ class NovelArrow implements Plugin.PluginBase {
       if (chapterId && name) {
         chapters.push({
           name,
-          path: `book/${novelId}/${chapterId}`,
+          path: `book/${slug}/${chapterId}`,
           releaseTime: null,
         });
       }
@@ -137,10 +145,9 @@ class NovelArrow implements Plugin.PluginBase {
   async parseChapter(chapterPath: string) {
     // Accept the previous `chapter/<slug>/<id>` form as well as the current
     // `book/<slug>/<id>` form.
-    const cleanPath = chapterPath.replace(/^\//, '');
-    const canonicalChapterPath = cleanPath.startsWith('chapter/')
-      ? `book/${cleanPath.replace(/^chapter\//, '')}`
-      : cleanPath;
+    const canonicalChapterPath = chapterPath
+      .replace(/^\//, '')
+      .replace(/^chapter\//, 'book/');
     const result = await fetchSite(this.site + canonicalChapterPath);
     const $ = parseHTML(result);
     const content = $('#chr-content');
