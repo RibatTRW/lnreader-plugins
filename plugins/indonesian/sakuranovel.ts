@@ -155,7 +155,10 @@ class SakuraNovel implements Plugin.PluginBase {
     });
     if (paragraphs.trim()) return paragraphs;
 
-    return loadedCheerio("div:contains('Daftar Isi') +").html() || '';
+    const legacy = loadedCheerio("div:contains('Daftar Isi') +").first();
+    const legacyInner = legacy.find('div:first').attr('class');
+    if (legacyInner) loadedCheerio(`.${legacyInner.split(' ')[0]}`).remove();
+    return legacy.html() || '';
   }
 
   async searchNovels(
