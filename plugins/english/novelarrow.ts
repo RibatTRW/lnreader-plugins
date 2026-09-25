@@ -56,15 +56,20 @@ class NovelArrow implements Plugin.PluginBase {
   }
 
   async parseNovel(novelPath: string) {
+    // Accept both the previous `novel/<slug>` paths (kept by existing
+    // library entries) and the current `book/<slug>` paths, and always
+    // request the current route.
+    const slug = novelPath
+      .replace(/^\//, '')
+      .replace(/^(book|novel)\//, '')
+      .split('/')[0];
+    const canonicalPath = `book/${slug}`;
     // Ensure no double slashes in the URL
-    const url = this.site + novelPath.replace(/^\//, '');
+    const url = this.site + canonicalPath;
     const result = await fetchApi(url, { headers }).then(res => res.text());
     const $ = parseHTML(result);
 
-    const novelId = novelPath
-      .replace(/^\//, '')
-      .replace(/^book\//, '')
-      .split('/')[0];
+    const novelId = slug;
 
     // Get the full summary from the paragraphs inside the description block
     const fullSummary =
@@ -78,7 +83,7 @@ class NovelArrow implements Plugin.PluginBase {
     ).toLowerCase();
 
     const novel: Plugin.SourceNovel = {
-      path: novelPath,
+      path: canonicalPath,
       name:
         $('meta[property="og:novel:novel_name"]').attr('content') ||
         $('h3.title').first().text().trim(),
@@ -119,11 +124,15 @@ class NovelArrow implements Plugin.PluginBase {
   }
 
   async parseChapter(chapterPath: string) {
-    const result = await fetchApi(this.site + chapterPath.replace(/^\//, ''), {
+    // Accept the previous `chapter/<slug>/<id>` form as well as the current
+    // `book/<slug>/<id>` form.
+    const cleanPath = chapterPath.replace(/^\//, '');
+    const canonicalChapterPath = cleanPath.startsWith('chapter/')
+      ? `book/${cleanPath.replace(/^chapter\//, '')}`
+      : cleanPath;
+    const result = await fetchApi(this.site + canonicalChapterPath, {
       headers,
-    })
-      .then(res => res.text())
-      .catch(() => '');
+    }).then(res => res.text());
     const $ = parseHTML(result);
     const content = $('#chr-content');
 
