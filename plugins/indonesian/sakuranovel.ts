@@ -151,7 +151,9 @@ class SakuraNovel implements Plugin.PluginBase {
 
     let paragraphs = '';
     loadedCheerio('p.ds-markdown-paragraph').each((i, el) => {
-      paragraphs += loadedCheerio(el).toString();
+      const para = loadedCheerio(el);
+      if (para.text().includes('Baca novel lain di sakuranovel')) return;
+      paragraphs += para.toString();
     });
     if (paragraphs.trim()) return paragraphs;
 
