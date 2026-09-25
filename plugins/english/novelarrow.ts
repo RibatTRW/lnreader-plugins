@@ -3,6 +3,13 @@ import { fetchApi } from '@libs/fetch';
 import { Plugin } from '@/types/plugin';
 import { NovelStatus } from '@libs/novelStatus';
 
+const headers = {
+  'User-Agent':
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+  Referer: 'https://novelping.com/',
+  'Accept-Language': 'en-US,en;q=0.9',
+};
+
 class NovelArrow implements Plugin.PluginBase {
   id = 'novelarrow';
   name = 'Novel Arrow';
@@ -44,14 +51,14 @@ class NovelArrow implements Plugin.PluginBase {
 
   async popularNovels(page: number) {
     const url = `${this.site}sort/updates?page=${page}`;
-    const result = await fetchApi(url).then(res => res.text());
+    const result = await fetchApi(url, { headers }).then(res => res.text());
     return this.parseListing(result);
   }
 
   async parseNovel(novelPath: string) {
     // Ensure no double slashes in the URL
     const url = this.site + novelPath.replace(/^\//, '');
-    const result = await fetchApi(url).then(res => res.text());
+    const result = await fetchApi(url, { headers }).then(res => res.text());
     const $ = parseHTML(result);
 
     const novelId = novelPath
@@ -86,7 +93,9 @@ class NovelArrow implements Plugin.PluginBase {
 
     // The chapter list is rendered through an ajax endpoint
     const chaptersUrl = `${this.site}ajax/chapter-archive?novelId=${encodeURIComponent(novelId)}`;
-    const chaptersHtml = await fetchApi(chaptersUrl).then(res => res.text());
+    const chaptersHtml = await fetchApi(chaptersUrl, { headers }).then(res =>
+      res.text(),
+    );
     const $$ = parseHTML(chaptersHtml);
     const chapters: Plugin.ChapterItem[] = [];
 
@@ -110,7 +119,9 @@ class NovelArrow implements Plugin.PluginBase {
   }
 
   async parseChapter(chapterPath: string) {
-    const result = await fetchApi(this.site + chapterPath.replace(/^\//, ''))
+    const result = await fetchApi(this.site + chapterPath.replace(/^\//, ''), {
+      headers,
+    })
       .then(res => res.text())
       .catch(() => '');
     const $ = parseHTML(result);
@@ -124,7 +135,7 @@ class NovelArrow implements Plugin.PluginBase {
 
   async searchNovels(searchTerm: string, page: number) {
     const url = `${this.site}search?keyword=${encodeURIComponent(searchTerm)}&page=${page}`;
-    const result = await fetchApi(url).then(res => res.text());
+    const result = await fetchApi(url, { headers }).then(res => res.text());
     return this.parseListing(result);
   }
 }
