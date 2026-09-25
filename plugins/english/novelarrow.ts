@@ -10,6 +10,19 @@ const headers = {
   'Accept-Language': 'en-US,en;q=0.9',
 };
 
+// Throw on a non-ok response carrying the HTTP status, so a refusal
+// surfaces as an error (classified INCONCLUSIVE by the live check)
+// instead of parsing into an empty result.
+async function fetchSite(url: string) {
+  const res = await fetchApi(url, { headers });
+  if (!res.ok) {
+    throw Object.assign(new Error('Request failed: ' + res.status), {
+      status: res.status,
+    });
+  }
+  return res.text();
+}
+
 class NovelArrow implements Plugin.PluginBase {
   id = 'novelarrow';
   name = 'Novel Arrow';
@@ -51,7 +64,7 @@ class NovelArrow implements Plugin.PluginBase {
 
   async popularNovels(page: number) {
     const url = `${this.site}sort/updates?page=${page}`;
-    const result = await fetchApi(url, { headers }).then(res => res.text());
+    const result = await fetchSite(url);
     return this.parseListing(result);
   }
 
@@ -66,7 +79,7 @@ class NovelArrow implements Plugin.PluginBase {
     const canonicalPath = `book/${slug}`;
     // Ensure no double slashes in the URL
     const url = this.site + canonicalPath;
-    const result = await fetchApi(url, { headers }).then(res => res.text());
+    const result = await fetchSite(url);
     const $ = parseHTML(result);
 
     const novelId = slug;
@@ -98,9 +111,7 @@ class NovelArrow implements Plugin.PluginBase {
 
     // The chapter list is rendered through an ajax endpoint
     const chaptersUrl = `${this.site}ajax/chapter-archive?novelId=${encodeURIComponent(novelId)}`;
-    const chaptersHtml = await fetchApi(chaptersUrl, { headers }).then(res =>
-      res.text(),
-    );
+    const chaptersHtml = await fetchSite(chaptersUrl);
     const $$ = parseHTML(chaptersHtml);
     const chapters: Plugin.ChapterItem[] = [];
 
@@ -130,9 +141,7 @@ class NovelArrow implements Plugin.PluginBase {
     const canonicalChapterPath = cleanPath.startsWith('chapter/')
       ? `book/${cleanPath.replace(/^chapter\//, '')}`
       : cleanPath;
-    const result = await fetchApi(this.site + canonicalChapterPath, {
-      headers,
-    }).then(res => res.text());
+    const result = await fetchSite(this.site + canonicalChapterPath);
     const $ = parseHTML(result);
     const content = $('#chr-content');
 
@@ -144,7 +153,7 @@ class NovelArrow implements Plugin.PluginBase {
 
   async searchNovels(searchTerm: string, page: number) {
     const url = `${this.site}search?keyword=${encodeURIComponent(searchTerm)}&page=${page}`;
-    const result = await fetchApi(url, { headers }).then(res => res.text());
+    const result = await fetchSite(url);
     return this.parseListing(result);
   }
 }
