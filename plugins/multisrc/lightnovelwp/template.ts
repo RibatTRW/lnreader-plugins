@@ -451,14 +451,17 @@ export class LightNovelWPPlugin implements Plugin.PluginBase {
     // those two wrappers, so both of those changes emptied every chapter;
     // select the body itself and read its paragraphs instead.
     const $ = load(data);
-    return (
-      $('.epcontent')
-        .first()
-        .find('p')
-        .map((_, el) => $.html(el) || '')
-        .get()
-        .join('\n') || ''
-    );
+    const chapterText = $('.epcontent')
+      .first()
+      .find('p')
+      .map((_, el) => $.html(el) || '')
+      .get()
+      .join('\n');
+    if (!chapterText)
+      throw new Error(
+        'Chapter text not found on the page, try to open in webview.',
+      );
+    return chapterText;
   }
 
   async searchNovels(

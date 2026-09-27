@@ -429,7 +429,8 @@ export class MadaraPlugin implements Plugin.PluginBase {
     // `$('.text-left') || $('.text-right') || …` chain never looked past the
     // first selector: on a site that no longer renders `.text-left` it
     // returned an empty body no matter what else the page offered. Walk the
-    // candidates and keep the first one that actually holds text.
+    // candidates and keep the first one that actually holds text or images
+    // (illustration and comic chapters have no text but did render before).
     let chapterText = loadedCheerio('.__no-chapter-content__');
     for (const selector of [
       '.text-left',
@@ -442,7 +443,7 @@ export class MadaraPlugin implements Plugin.PluginBase {
       '.c-blog-post > div > div:nth-child(2)',
     ]) {
       const candidate = loadedCheerio(selector);
-      if (candidate.text().trim()) {
+      if (candidate.text().trim() || candidate.find('img').length) {
         chapterText = candidate;
         break;
       }
@@ -456,6 +457,11 @@ export class MadaraPlugin implements Plugin.PluginBase {
         throw error;
       }
     }
+
+    if (!chapterText.length)
+      throw new Error(
+        'Chapter text not found on the page, try to open in webview.',
+      );
 
     return this.translateDragontea(chapterText).html() || '';
   }
