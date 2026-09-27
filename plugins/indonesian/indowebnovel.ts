@@ -1,4 +1,5 @@
-import { CheerioAPI, load as parseHTML } from 'cheerio';
+import { Cheerio, CheerioAPI, load as parseHTML } from 'cheerio';
+import { AnyNode } from 'domhandler';
 import { fetchApi } from '@libs/fetch';
 import { Plugin } from '@/types/plugin';
 import { NovelStatus } from '@libs/novelStatus';
@@ -178,12 +179,14 @@ class IndoWebNovel implements Plugin.PluginBase {
       base: true,
       bdi: true,
       bdo: true,
+      big: true,
       blockquote: true,
       body: true,
       br: true,
       button: true,
       canvas: true,
       caption: true,
+      center: true,
       cite: true,
       code: true,
       col: true,
@@ -203,6 +206,7 @@ class IndoWebNovel implements Plugin.PluginBase {
       fieldset: true,
       figcaption: true,
       figure: true,
+      font: true,
       footer: true,
       form: true,
       h1: true,
@@ -283,14 +287,23 @@ class IndoWebNovel implements Plugin.PluginBase {
       video: true,
       wbr: true,
     };
+    // A phrase may wrap across a line break, so the match spans newlines.
     const safeBody = body.replace(
-      /<(\/?)([A-Za-z][A-Za-z0-9]*)([^<>\n]*>)/g,
+      /<(\/?)([A-Za-z][A-Za-z0-9]*)([^<>]*>)/g,
       (match: string, slash: string, name: string, rest: string) => {
         if (realTags[name.toLowerCase()]) return match;
         const inner = slash + name + rest.slice(0, -1);
-        // A clean tag shape (lowercase token words only) is a site token,
-        // left for the parser and the unwrap below.
-        if (/^\/?[a-z][a-z0-9]*(?: [a-z][a-z0-9]*)*\/?$/.test(inner)) {
+        // A single lowercase token is a site watermark wrapper, left for the
+        // parser and the unwrap below, but only when it is a closing or
+        // self-closing tag or its closing tag exists: a lone `<status>` or
+        // a multi-word `<protect the empire>` is a story phrase whose words
+        // would otherwise be lost as a tag name and attributes.
+        if (
+          /^\/?[a-z][a-z0-9]*\/?$/.test(inner) &&
+          (slash ||
+            inner.slice(-1) === '/' ||
+            body.indexOf('</' + name + '>') !== -1)
+        ) {
           return match;
         }
         return '&lt;' + inner + '&gt;';
@@ -298,6 +311,11 @@ class IndoWebNovel implements Plugin.PluginBase {
     );
 
     const loadedCheerio = parseHTML(safeBody);
+
+    // Scripts and styles are never story content, and their raw `<`/`&`
+    // characters are not valid XHTML, so drop them before choosing a host:
+    // a host holding only a script must not count as a chapter body.
+    loadedCheerio('script, style').remove();
 
     // The chapter body is nested in `main .content .container` behind a div
     // whose class is a rotating random token (the previous hardcoded name,
@@ -308,6 +326,11 @@ class IndoWebNovel implements Plugin.PluginBase {
     // paragraphs directly in the stable outer `.tldari...` container with
     // no inner host at all. Without the fallbacks a chapter using another
     // era's markup parses to empty text.
+    // A host counts only when it holds readable text or an image; markup
+    // alone (empty ad slots, decoy shells) falls through to the next host.
+    // Class hosts such as the generic `.text-left` can match more than one
+    // element, so take the match with the most text rather than whichever
+    // comes first (e.g. a short title bar ahead of the story).
     const hosts = [
       'main #content',
       'main #nr-nv-content',
@@ -315,12 +338,22 @@ class IndoWebNovel implements Plugin.PluginBase {
       'main .text-left',
       'main .tldariinggrissendiribrojangancopy',
     ];
-    let chapter = loadedCheerio(hosts[0]);
-    for (let i = 1; i < hosts.length; i++) {
-      if (chapter.length && (chapter.html() || '').trim()) break;
-      chapter = loadedCheerio(hosts[i]);
+    const hasContent = (node: Cheerio<AnyNode>) =>
+      !!node.text().trim() || node.find('img').length > 0;
+    let chapter: Cheerio<AnyNode> | undefined;
+    for (const host of hosts) {
+      loadedCheerio(host).each((_, el) => {
+        const node = loadedCheerio(el);
+        if (
+          hasContent(node) &&
+          (!chapter || node.text().trim().length > chapter.text().trim().length)
+        ) {
+          chapter = node;
+        }
+      });
+      if (chapter) break;
     }
-    if (!chapter.length || !(chapter.html() || '').trim()) {
+    if (!chapter) {
       // Fail loudly so a future template change reports instead of
       // pretending success with an empty chapter, mirroring how refused
       // responses throw above.
@@ -332,18 +365,18 @@ class IndoWebNovel implements Plugin.PluginBase {
       );
     }
 
-    // Scripts and styles are never story content, and their raw `<`/`&`
-    // characters are not valid XHTML, so drop them.
-    chapter.find('script, style').remove();
-
     // Drop hidden elements (audio payloads, overlay containers): they are
     // never visible story content in a static reader. Match complete zero
     // values only: a prefix match would delete visible elements styled
-    // e.g. `opacity: 0.5` or `font-size: 0.9em`.
+    // e.g. `opacity: 0.5` or `font-size: 0.9em`, but accept every spelling
+    // of zero (`0`, `0.0`, `0%`, `0pt`, `0vw`). The boolean `hidden`
+    // attribute hides too, and must go here: the empty-attribute cleanup
+    // below would otherwise strip it and reveal the element.
+    chapter.find('[hidden]').remove();
     chapter.find('[style]').each((_, el) => {
       const style = loadedCheerio(el).attr('style') || '';
       if (
-        /display\s*:\s*none|visibility\s*:\s*hidden|opacity\s*:\s*0(?=\s*(?:;|$|!))|font-size\s*:\s*0(?:px|em|rem)?(?=\s*(?:;|$|!))/i.test(
+        /display\s*:\s*none|visibility\s*:\s*hidden|(?:opacity|font-size)\s*:\s*0*\.?0+(?:[a-z]+|%)?(?=\s*(?:;|$|!))/i.test(
           style,
         )
       ) {
@@ -400,8 +433,15 @@ class IndoWebNovel implements Plugin.PluginBase {
       });
     });
 
-    const chapterText = chapter.html() || '';
-    if (!chapterText.trim()) {
+    // XML 1.0 forbids C0 control characters other than tab, line feed and
+    // carriage return; the HTML parser keeps them, and one stray control
+    // character makes the whole chapter invalid XHTML for EPUB export.
+    const chapterText = (chapter.html() || '').replace(
+      // eslint-disable-next-line no-control-regex
+      /[\x00-\x08\x0B\x0C\x0E-\x1F\uFFFE\uFFFF]/g,
+      '',
+    );
+    if (!hasContent(chapter)) {
       throw Object.assign(
         new Error(
           'IndoWebNovel: chapter body empty after cleanup: ' + chapterPath,
