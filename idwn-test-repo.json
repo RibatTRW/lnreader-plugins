@@ -1,0 +1,11 @@
+[
+  {
+    "id": "IDWN.id",
+    "name": "IndoWebNovel",
+    "site": "https://indowebnovel.id/",
+    "lang": "Bahasa Indonesia",
+    "version": "1.3.2",
+    "url": "https://raw.githubusercontent.com/RibatTRW/lnreader-plugins/test/idwn-1.3.2/.js/src/plugins/indonesian/indowebnovel.js",
+    "iconUrl": "https://raw.githubusercontent.com/lnreader/lnreader-plugins/plugins/v3.0.0/public/static/src/id/indowebnovel/icon.png"
+  }
+]
