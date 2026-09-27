@@ -9,7 +9,7 @@ class IndoWebNovel implements Plugin.PluginBase {
   name = 'IndoWebNovel';
   icon = 'src/id/indowebnovel/icon.png';
   site = 'https://indowebnovel.id/';
-  version = '1.3.1';
+  version = '1.3.2';
 
   private headers = {
     'User-Agent':
@@ -159,13 +159,256 @@ class IndoWebNovel implements Plugin.PluginBase {
   async parseChapter(chapterPath: string): Promise<string> {
     const body = await this.fetchPage(this.site + chapterPath);
 
-    const loadedCheerio = parseHTML(body);
+    // The site wraps stray story phrases in angle brackets as an anti-scrape
+    // measure (e.g. `<Lindungi Kekaisaran>`). Left alone, those pseudo-tags
+    // parse as elements and their words are lost (a tag name is not text).
+    // Escape them back to text before parsing so the phrase survives
+    // verbatim, with its original case and punctuation. Only real HTML
+    // elements and clean token-shaped tags (e.g. the `<nfn8a88>` watermark
+    // wrappers, handled below) keep their brackets.
+    const realTags: Record<string, boolean> = {
+      a: true,
+      abbr: true,
+      address: true,
+      area: true,
+      article: true,
+      aside: true,
+      audio: true,
+      b: true,
+      base: true,
+      bdi: true,
+      bdo: true,
+      blockquote: true,
+      body: true,
+      br: true,
+      button: true,
+      canvas: true,
+      caption: true,
+      cite: true,
+      code: true,
+      col: true,
+      colgroup: true,
+      data: true,
+      datalist: true,
+      dd: true,
+      del: true,
+      details: true,
+      dfn: true,
+      dialog: true,
+      div: true,
+      dl: true,
+      dt: true,
+      em: true,
+      embed: true,
+      fieldset: true,
+      figcaption: true,
+      figure: true,
+      footer: true,
+      form: true,
+      h1: true,
+      h2: true,
+      h3: true,
+      h4: true,
+      h5: true,
+      h6: true,
+      head: true,
+      header: true,
+      hgroup: true,
+      hr: true,
+      html: true,
+      i: true,
+      iframe: true,
+      img: true,
+      input: true,
+      ins: true,
+      kbd: true,
+      label: true,
+      legend: true,
+      li: true,
+      link: true,
+      main: true,
+      map: true,
+      mark: true,
+      meta: true,
+      meter: true,
+      nav: true,
+      nobr: true,
+      noscript: true,
+      object: true,
+      ol: true,
+      optgroup: true,
+      option: true,
+      output: true,
+      p: true,
+      path: true,
+      picture: true,
+      pre: true,
+      progress: true,
+      q: true,
+      rp: true,
+      rt: true,
+      ruby: true,
+      s: true,
+      samp: true,
+      script: true,
+      search: true,
+      section: true,
+      select: true,
+      small: true,
+      source: true,
+      span: true,
+      strike: true,
+      strong: true,
+      style: true,
+      sub: true,
+      summary: true,
+      sup: true,
+      svg: true,
+      table: true,
+      tbody: true,
+      td: true,
+      template: true,
+      textarea: true,
+      tfoot: true,
+      th: true,
+      thead: true,
+      time: true,
+      title: true,
+      tr: true,
+      track: true,
+      tt: true,
+      u: true,
+      ul: true,
+      var: true,
+      video: true,
+      wbr: true,
+    };
+    const safeBody = body.replace(
+      /<(\/?)([A-Za-z][A-Za-z0-9]*)([^<>\n]*>)/g,
+      (match: string, slash: string, name: string, rest: string) => {
+        if (realTags[name.toLowerCase()]) return match;
+        const inner = slash + name + rest.slice(0, -1);
+        // A clean tag shape (lowercase token words only) is a site token,
+        // left for the parser and the unwrap below.
+        if (/^\/?[a-z][a-z0-9]*(?: [a-z][a-z0-9]*)*\/?$/.test(inner)) {
+          return match;
+        }
+        return '&lt;' + inner + '&gt;';
+      },
+    );
+
+    const loadedCheerio = parseHTML(safeBody);
 
     // The chapter body is nested in `main .content .container` behind a div
     // whose class is a rotating random token (the previous hardcoded name,
-    // `.adsads`, no longer exists), so use the stable inner `#content`
-    // element instead of that wrapper class.
-    const chapterText = loadedCheerio('main #content').html() || '';
+    // `.adsads`, no longer exists). The stable inner host changed shape
+    // across the site's history, so try each known host in turn: newer
+    // chapters render `#content`, older ones `#nr-nv-content`,
+    // `.entry-content` or `.text-left`, and the oldest ones hold their
+    // paragraphs directly in the stable outer `.tldari...` container with
+    // no inner host at all. Without the fallbacks a chapter using another
+    // era's markup parses to empty text.
+    const hosts = [
+      'main #content',
+      'main #nr-nv-content',
+      'main .entry-content',
+      'main .text-left',
+      'main .tldariinggrissendiribrojangancopy',
+    ];
+    let chapter = loadedCheerio(hosts[0]);
+    for (let i = 1; i < hosts.length; i++) {
+      if (chapter.length && (chapter.html() || '').trim()) break;
+      chapter = loadedCheerio(hosts[i]);
+    }
+    if (!chapter.length || !(chapter.html() || '').trim()) {
+      // Fail loudly so a future template change reports instead of
+      // pretending success with an empty chapter, mirroring how refused
+      // responses throw above.
+      throw Object.assign(
+        new Error(
+          'IndoWebNovel: no readable chapter body found: ' + chapterPath,
+        ),
+        { status: 200 },
+      );
+    }
+
+    // Scripts and styles are never story content, and their raw `<`/`&`
+    // characters are not valid XHTML, so drop them.
+    chapter.find('script, style').remove();
+
+    // Drop hidden elements (audio payloads, overlay containers): they are
+    // never visible story content in a static reader. Match complete zero
+    // values only: a prefix match would delete visible elements styled
+    // e.g. `opacity: 0.5` or `font-size: 0.9em`.
+    chapter.find('[style]').each((_, el) => {
+      const style = loadedCheerio(el).attr('style') || '';
+      if (
+        /display\s*:\s*none|visibility\s*:\s*hidden|opacity\s*:\s*0(?=\s*(?:;|$|!))|font-size\s*:\s*0(?:px|em|rem)?(?=\s*(?:;|$|!))/i.test(
+          style,
+        )
+      ) {
+        loadedCheerio(el).remove();
+      }
+    });
+
+    // Second line of defence for anything shaped like markup that slipped
+    // through the escape above: unwrap every element that is not a genuine
+    // content tag, keeping its text, and drop any remaining attribute whose
+    // name is not a valid XML name. Serialized bogus attributes are not
+    // valid XHTML (e.g. an attribute name starting with `&` or ending in
+    // `!`), which breaks the app's EPUB export.
+    const contentTags =
+      'a, abbr, b, big, blockquote, br, center, cite, code, dd, del, dfn, ' +
+      'div, dl, dt, em, figcaption, figure, font, h1, h2, h3, h4, h5, h6, hr, ' +
+      'i, img, ins, kbd, li, mark, ol, p, pre, q, s, samp, small, source, ' +
+      'span, strike, strong, sub, sup, table, tbody, td, tfoot, th, thead, ' +
+      'tr, tt, u, ul, var, wbr';
+    let rogue = chapter.find('*').not(contentTags);
+    while (rogue.length) {
+      rogue.each((_, el) => {
+        const node = loadedCheerio(el);
+        node.replaceWith(node.html() || '');
+      });
+      rogue = chapter.find('*').not(contentTags);
+    }
+
+    // Drop empty decoy divs: the site plants text-empty `<div>`s with
+    // rotating random-token classes between paragraphs, and stripped ad
+    // containers leave nested empty shells behind. An empty div renders
+    // nothing, but keep any div holding real children (images, line breaks)
+    // so no reader content is lost. Walk innermost-first so newly emptied
+    // parents are dropped in the same pass. This runs after the unwrap
+    // above because unwrapping can empty out a div.
+    const divs = chapter.find('div').toArray().reverse();
+    for (const div of divs) {
+      const node = loadedCheerio(div);
+      if (!node.children().length && !node.text().trim()) node.remove();
+    }
+    chapter.find('*').each((_, el) => {
+      const attribs = el.attribs || {};
+      Object.keys(attribs).forEach(name => {
+        // Drop attributes with invalid XML names, and attributes with
+        // empty values: downstream serializers emit those bare, which is
+        // not well-formed XML (e.g. a valueless `data-*` reader widget
+        // attribute). An empty attribute value carries no information.
+        if (
+          attribs[name] === '' ||
+          !/^[A-Za-z_:][A-Za-z0-9_.:-]*$/.test(name)
+        ) {
+          loadedCheerio(el).removeAttr(name);
+        }
+      });
+    });
+
+    const chapterText = chapter.html() || '';
+    if (!chapterText.trim()) {
+      throw Object.assign(
+        new Error(
+          'IndoWebNovel: chapter body empty after cleanup: ' + chapterPath,
+        ),
+        { status: 200 },
+      );
+    }
 
     return chapterText;
   }
