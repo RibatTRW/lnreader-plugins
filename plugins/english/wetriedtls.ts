@@ -186,6 +186,21 @@ function isCreditLine(p: string): boolean {
   );
 }
 
+/**
+ * splitTopLevel, with plain wrapper elements (div / section / article)
+ * unwrapped so a header and the story inside one wrapper are judged block
+ * by block instead of as a single unit.
+ */
+function splitBlocks(html: string): string[] {
+  const out: string[] = [];
+  for (const b of splitTopLevel(html)) {
+    const w = /^<(div|section|article)\b[^>]*>([\s\S]*)<\/\1\s*>$/i.exec(b);
+    if (w) for (const inner of splitBlocks(w[2])) out.push(inner);
+    else out.push(b);
+  }
+  return out;
+}
+
 /** A block that is nothing but bold text, e.g. a header line. */
 function isBoldOnly(p: string): boolean {
   const inner = p
@@ -278,7 +293,7 @@ const VOID_TAGS =
  * divs stay intact) or run of loose text becomes one block. An unclosed
  * <p> is ended by the next <p>, as an HTML parser would.
  */
-function splitBlocks(html: string): string[] {
+function splitTopLevel(html: string): string[] {
   const blocks: string[] = [];
   const tagRe = /<(\/?)([a-z][a-z0-9]*)\b[^>]*?(\/?)>/gi;
   let depth = 0;
@@ -538,11 +553,23 @@ function parseChapterContent(html: string): ChapterContentResult {
   const blocks = splitBlocks(body);
   if (blocks.length === 0) return { status: 'empty' };
   const titles = pageTitles(flight);
+  // Site chrome is a short plain line. A long block, or a list / table /
+  // blockquote that merely contains a banner or credit, is story text and
+  // must never be trimmed as junk.
   const isEdgeJunk = (p: string) =>
-    isPromoParagraph(p) ||
-    isCreditLine(p) ||
-    isDivider(p) ||
-    isTitleRepeat(p, titles);
+    !/^<(?:blockquote|ul|ol|table|pre)\b/i.test(p) &&
+    paragraphText(p).length <= 250 &&
+    (isPromoParagraph(p) ||
+      isCreditLine(p) ||
+      isDivider(p) ||
+      isTitleRepeat(p, titles));
+  // A bold lead-in only counts as header when it reads like a title line.
+  const isHeaderLine = (p: string) =>
+    isEdgeJunk(p) ||
+    (isBoldOnly(p) &&
+      /^[◈◆■●\s]*(?:chapter|ch\.?|vol\.?|volume|episode|ep\.?|prologue|epilogue|side story|extra)\b|^[◈◆■●]|[◈◆■●]$/i.test(
+        paragraphText(p),
+      ));
   let start = 0;
   let end = blocks.length;
   // The site's header is a bold series / chapter title followed by a divider
@@ -557,7 +584,7 @@ function parseChapterContent(html: string): ChapterContentResult {
     }
     let header = divider >= 0;
     for (let i = start; header && i < divider; i++) {
-      header = isEdgeJunk(blocks[i]) || isBoldOnly(blocks[i]);
+      header = isHeaderLine(blocks[i]);
     }
     if (!header) break;
     start = divider + 1;
