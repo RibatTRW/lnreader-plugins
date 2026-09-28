@@ -1,5 +1,5 @@
 import { Plugin } from '@/types/plugin';
-import { fetchApi } from '@libs/fetch';
+import { fetchApi, FetchInit } from '@libs/fetch';
 import { load as loadCheerio } from 'cheerio';
 import { defaultCover } from '@libs/defaultCover';
 import { NovelStatus } from '@libs/novelStatus';
@@ -77,6 +77,18 @@ class Dragonholic implements Plugin.PluginBase {
       });
   }
 
+  // Throw (carrying the HTTP status) on a refused response so a block is
+  // reported instead of being parsed into a false empty result.
+  private async fetchSite(url: string, init?: FetchInit) {
+    const res = await fetchApi(url, init);
+    if (!res.ok) {
+      throw Object.assign(new Error('Request failed: ' + res.status), {
+        status: res.status,
+      });
+    }
+    return res;
+  }
+
   private normalizePath(path: string): string {
     return path
       .replace(/\/{2,}/g, '/')
@@ -86,7 +98,7 @@ class Dragonholic implements Plugin.PluginBase {
 
   async popularNovels(pageNo: number): Promise<Plugin.NovelItem[]> {
     const url = pageNo > 1 ? this.site + '/?updates_page=' + pageNo : this.site;
-    const res = await fetchApi(url);
+    const res = await this.fetchSite(url);
     const body = await res.text();
     const loadedCheerio = loadCheerio(body);
     const novels: Plugin.NovelItem[] = [];
@@ -121,7 +133,7 @@ class Dragonholic implements Plugin.PluginBase {
 
   async parseNovel(path: string): Promise<Plugin.SourceNovel> {
     const novelPath = this.normalizePath(path);
-    const res = await fetchApi(this.resolveUrl(novelPath));
+    const res = await this.fetchSite(this.resolveUrl(novelPath));
     const body = await res.text();
     const loadedCheerio = loadCheerio(body);
 
@@ -174,7 +186,7 @@ class Dragonholic implements Plugin.PluginBase {
     const seriesId = body.match(/seriesId:\s*(\d+)/)?.[1];
     const chapters: Plugin.ChapterItem[] = [];
     if (seriesId) {
-      const chaptersRes = await fetchApi(
+      const chaptersRes = await this.fetchSite(
         this.site +
           '/api/chapters?series_id=' +
           seriesId +
@@ -210,7 +222,7 @@ class Dragonholic implements Plugin.PluginBase {
   }
 
   async parseChapter(chapterPath: string): Promise<string> {
-    const res = await fetchApi(this.resolveUrl(chapterPath));
+    const res = await this.fetchSite(this.resolveUrl(chapterPath));
     const body = await res.text();
     const loadedCheerio = loadCheerio(body);
     const content = loadedCheerio('.chapter-content');
@@ -231,7 +243,7 @@ class Dragonholic implements Plugin.PluginBase {
   }
 
   async searchNovels(searchTerm: string): Promise<Plugin.NovelItem[]> {
-    const res = await fetchApi(
+    const res = await this.fetchSite(
       this.site + '/api/search?q=' + encodeURIComponent(searchTerm),
       {
         headers: {
