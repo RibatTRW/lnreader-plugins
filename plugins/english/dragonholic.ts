@@ -37,7 +37,7 @@ class Dragonholic implements Plugin.PluginBase {
   name = 'Dragonholic';
   icon = 'src/en/dragonholic/icon.png';
   site = 'https://dragonholictranslations.com';
-  version = '1.0.0';
+  version = '3.0.0';
 
   private decodeEntities(text: string): string {
     return text
@@ -77,6 +77,13 @@ class Dragonholic implements Plugin.PluginBase {
       });
   }
 
+  private normalizePath(path: string): string {
+    return path
+      .replace(/\/{2,}/g, '/')
+      .replace(/^\/+|\/+$/g, '')
+      .replace(/^novel\//, '');
+  }
+
   async popularNovels(pageNo: number): Promise<Plugin.NovelItem[]> {
     const url = pageNo > 1 ? this.site + '/?updates_page=' + pageNo : this.site;
     const res = await fetchApi(url);
@@ -104,7 +111,7 @@ class Dragonholic implements Plugin.PluginBase {
           defaultCover;
 
         if (name) {
-          novels.push({ name: this.decodeEntities(name), path: slug, cover });
+          novels.push({ name, path: slug, cover });
         }
       },
     );
@@ -112,8 +119,9 @@ class Dragonholic implements Plugin.PluginBase {
     return novels;
   }
 
-  async parseNovel(novelPath: string): Promise<Plugin.SourceNovel> {
-    const res = await fetchApi(this.site + '/series/' + novelPath + '/');
+  async parseNovel(path: string): Promise<Plugin.SourceNovel> {
+    const novelPath = this.normalizePath(path);
+    const res = await fetchApi(this.resolveUrl(novelPath));
     const body = await res.text();
     const loadedCheerio = loadCheerio(body);
 
@@ -122,7 +130,7 @@ class Dragonholic implements Plugin.PluginBase {
       name: '',
     };
 
-    novel.name = this.decodeEntities(loadedCheerio('h1').first().text().trim());
+    novel.name = loadedCheerio('h1').first().text().trim();
 
     const cover =
       loadedCheerio('[x-data="coverModal()"] img').first().attr('src') ||
@@ -160,7 +168,7 @@ class Dragonholic implements Plugin.PluginBase {
       .filter(text => text && !/^synopsis:?$/i.test(text))
       .join('\n');
     if (summary) {
-      novel.summary = this.decodeEntities(summary);
+      novel.summary = summary;
     }
 
     const seriesId = body.match(/seriesId:\s*(\d+)/)?.[1];
@@ -183,14 +191,16 @@ class Dragonholic implements Plugin.PluginBase {
       list.forEach(item => {
         if (!item.slug) return;
         const order = Number(item.chapter_order);
-        const title = [item.heading || item.name, item.subtitle]
-          .filter(part => part && part.trim())
-          .join(' - ');
+        const title = this.decodeEntities(
+          [item.heading || item.name, item.subtitle]
+            .filter(part => part && part.trim())
+            .join(' - ') || item.slug,
+        );
         chapters.push({
-          name: this.decodeEntities(title || item.slug),
-          path: novelPath + '/' + item.slug + '/',
+          name: item.is_premium ? '🔒 ' + title : title,
+          path: novelPath + '/' + item.slug,
           releaseTime: item.created_at || undefined,
-          chapterNumber: Number.isFinite(order) ? order : chapters.length + 1,
+          chapterNumber: order > 0 ? order : chapters.length + 1,
         });
       });
     }
@@ -200,7 +210,7 @@ class Dragonholic implements Plugin.PluginBase {
   }
 
   async parseChapter(chapterPath: string): Promise<string> {
-    const res = await fetchApi(this.site + '/series/' + chapterPath);
+    const res = await fetchApi(this.resolveUrl(chapterPath));
     const body = await res.text();
     const loadedCheerio = loadCheerio(body);
     const content = loadedCheerio('.chapter-content');
@@ -211,11 +221,13 @@ class Dragonholic implements Plugin.PluginBase {
 
     let chapterText = '';
     content.find('p').each((_, element) => {
-      const text = loadedCheerio(element).text().trim();
-      if (text) chapterText += '<p>' + text + '</p>';
+      const paragraph = loadedCheerio(element);
+      if (paragraph.text().trim() || paragraph.find('img').length) {
+        chapterText += '<p>' + (paragraph.html() || '').trim() + '</p>';
+      }
     });
 
-    return this.decodeEntities(chapterText);
+    return chapterText;
   }
 
   async searchNovels(searchTerm: string): Promise<Plugin.NovelItem[]> {
@@ -247,7 +259,8 @@ class Dragonholic implements Plugin.PluginBase {
     return novels;
   }
 
-  resolveUrl = (path: string) => this.site + '/series/' + path;
+  resolveUrl = (path: string) =>
+    this.site + '/series/' + this.normalizePath(path) + '/';
 }
 
 export default new Dragonholic();
