@@ -668,6 +668,7 @@
     "sourceName": "Lovelyblossoms",
     "options": {
       "useNewChapterEndpoint": true,
+      "browserHeaders": true,
       "versionIncrements": 1
     }
   },

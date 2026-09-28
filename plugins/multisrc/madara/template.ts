@@ -18,6 +18,7 @@ type MadaraOptions = {
   versionIncrements?: number;
   customJs?: string;
   hasLocked?: boolean;
+  browserHeaders?: boolean;
 };
 
 export type MadaraMetadata = {
@@ -61,18 +62,17 @@ export class MadaraPlugin implements Plugin.PluginBase {
     }
   }
 
-  // Browser-like headers: Cloudflare-fronted Madara sites (e.g.
-  // lovelyblossoms.com, see #2599) answer non-browser fetches with 403
-  // while the WebView loads fine, so mirror what a mobile Chrome sends.
-  // fetchApi's defaults add Connection/Accept/Sec-Fetch-Mode around these.
-  browserHeaders: Record<string, string> = {
-    'User-Agent':
-      'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36',
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-    'Accept-Language': 'en-US,en;q=0.9',
-    'Sec-Fetch-Site': 'cross-site',
-    'Sec-Fetch-Dest': 'empty',
-  };
+  // Opt-in for sites whose bot check rejects fetchApi's wildcard Accept
+  // headers (e.g. lovelyblossoms.com, see #2599). The app's User-Agent is
+  // left untouched so WebView clearance cookies still match.
+  get requestHeaders(): Record<string, string> | undefined {
+    if (!this.options?.browserHeaders) return undefined;
+    return {
+      'Accept':
+        'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+      'Accept-Language': 'en-US,en;q=0.9',
+    };
+  }
 
   translateDragontea(text: Cheerio<AnyNode>): Cheerio<AnyNode> {
     if (this.id !== 'dragontea') return text;
@@ -120,7 +120,7 @@ export class MadaraPlugin implements Plugin.PluginBase {
   }
 
   async getCheerio(url: string, search: boolean): Promise<CheerioAPI> {
-    const r = await fetchApi(url, { headers: this.browserHeaders });
+    const r = await fetchApi(url, { headers: this.requestHeaders });
     if (!r.ok && search != true)
       throw new Error(
         'Could not reach site (' + r.status + ') try to open in webview.',
@@ -327,7 +327,7 @@ export class MadaraPlugin implements Plugin.PluginBase {
     if (this.options?.useNewChapterEndpoint) {
       html = await fetchApi(this.site + novelPath + 'ajax/chapters/', {
         method: 'POST',
-        headers: this.browserHeaders,
+        headers: this.requestHeaders,
         referrer: this.site + novelPath,
       }).then((res: Response) => res.text());
 
@@ -350,7 +350,7 @@ export class MadaraPlugin implements Plugin.PluginBase {
               this.site + novelPath + 'ajax/chapters/' + queryTemplate + page,
               {
                 method: 'POST',
-                headers: this.browserHeaders,
+                headers: this.requestHeaders,
                 referrer: this.site + novelPath,
               },
             ).then((res: Response) => res.text());
@@ -370,7 +370,7 @@ export class MadaraPlugin implements Plugin.PluginBase {
 
       html = await fetchApi(this.site + 'wp-admin/admin-ajax.php', {
         method: 'POST',
-        headers: this.browserHeaders,
+        headers: this.requestHeaders,
         body: formData,
       }).then((res: Response) => res.text());
     }
