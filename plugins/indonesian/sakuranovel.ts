@@ -145,6 +145,8 @@ class SakuraNovel implements Plugin.PluginBase {
     const body = await result.text();
 
     const loadedCheerio = parseHTML(body);
+    // Inline ad blocks (adsbygoogle scripts, <ins> slots, sticky-ad styles) sit inside the chapter body on some layouts.
+    loadedCheerio('script, style, ins, noscript').remove();
 
     // Tier 1: themed content container — the obfuscated parent class marks the real chapter body when the site serves its full theme markup.
     for (const selector of CHAPTER_CONTENT_SELECTORS) {
@@ -166,11 +168,26 @@ class SakuraNovel implements Plugin.PluginBase {
       .join('');
     if (paragraphs.trim()) return paragraphs;
 
-    // Tier 3 (last resort): the legacy layout locates the body as the sibling after the 'Daftar Isi' div — fragile by construction since :contains matches every ancestor, so this stays last and scoped to the container only.
-    const legacy = loadedCheerio("div:contains('Daftar Isi') +").first();
-    const legacyInner = legacy.find('div:first').attr('class');
-    if (legacyInner) legacy.find(`.${legacyInner.split(' ')[0]}`).remove();
-    return legacy.html() || '';
+    // Tier 3 (last resort): the body is the first non-empty sibling between the top and bottom chapter navigation. Its wrapper class rotates, and an empty anti-scrape decoy div can sit in between.
+    const legacy = loadedCheerio('.entry-pagination')
+      .first()
+      .nextUntil('.entry-pagination')
+      .filter((i, el) => {
+        const sibling = loadedCheerio(el);
+        return !!sibling.text().trim() || sibling.find('img').length > 0;
+      })
+      .first();
+    legacy.find(`p:contains('${PROMO_TEXT}')`).remove();
+    // Older layouts open the body with an ad wrapper div whose class repeats around every ad slot; drop it only when it is empty, as on some layouts the first div is the text itself.
+    const legacyInner = legacy.find('div').first();
+    const legacyInnerClass = legacyInner.attr('class');
+    if (
+      legacyInnerClass &&
+      !legacyInner.text().trim() &&
+      !legacyInner.find('img').length
+    )
+      legacy.find(`.${legacyInnerClass.split(' ')[0]}`).remove();
+    return (legacy.html() || '').trim();
   }
 
   async searchNovels(
