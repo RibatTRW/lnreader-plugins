@@ -175,12 +175,13 @@ function isTitleRepeat(p: string, knownTitles: string[]): boolean {
  * in the chapter header next to the banner are site chrome, not story
  * content. Covers `Translator: X`, `Editors: A, B`, `Translator/Editor: X`
  * and `[Translator – X]`. Narrow on purpose: it must start with a role
- * word followed by a separator, so ordinary prose never matches.
+ * word followed by a separator (a dash only when spaced, so prose such as
+ * "Editor-in-chief Kim ..." never matches).
  */
 function isCreditLine(p: string): boolean {
   const t = paragraphText(p);
   return (
-    /^\[?\s*(?:(?:translat(?:or|ors|ion)|editors?|proofreaders?|typesetters?|tlc?|qc)\s*[/&,]?\s*)+\s*(?:[:\]–—-]|by\b)/i.test(
+    /^\[?\s*(?:(?:translat(?:or|ors|ion)|editors?|proofreaders?|typesetters?|tlc?|qc)\s*[/&,]?\s*)+\s*(?:[:\]]|[–—-]\s|by\b)/i.test(
       t,
     ) || /^(?:discord|ko-?fi|patreon)\s*:/i.test(t)
   );
@@ -259,29 +260,99 @@ function isScriptUrl(url: string): boolean {
   return /^(javascript|vbscript):/i.test(norm);
 }
 
+// Dangerous elements, plus the raw-text elements (title, xmp, ...) whose
+// content a browser reads as text: tags inside them must not be judged as
+// real tags by the attribute pass below.
 const UNSAFE_TAGS =
-  'script|iframe|object|embed|form|input|textarea|select|button|style|link|meta|base|noscript';
+  'script|iframe|object|embed|form|input|textarea|select|button|style|link|meta|base|noscript|title|xmp|noembed|noframes|plaintext';
+
+/** Attributes whose value the reader may navigate to. */
+const URL_ATTRS = /^(?:xlink:)?(?:href|src|action|formaction)$/;
+
+/** SVG animation attributes that can write a script URL into an href. */
+const ANIMATION_ATTRS = /^(?:values|to|from)$/;
+
+function isUnsafeAttr(name: string, value: string): boolean {
+  const n = name.toLowerCase();
+  if (n.indexOf('on') === 0) return true;
+  if (URL_ATTRS.test(n)) return isScriptUrl(value);
+  if (ANIMATION_ATTRS.test(n)) return value.split(';').some(isScriptUrl);
+  return false;
+}
 
 /**
- * Strip anything that could execute code from chapter HTML before it
- * reaches the reader, which renders it unsanitized: dangerous elements,
- * event handler attributes (<img onerror=...>) and script URLs in any
- * link-like attribute, including SVG's xlink:href. Everything else is
- * preserved as-is.
+ * Strip anything that could execute code from chapter HTML: dangerous
+ * elements, event handler attributes (<img onerror=...>), and script URLs in
+ * link-like or SVG animation attributes. The reader sanitizes too; this
+ * keeps the plugin's own output safe. Everything else is preserved as-is.
  */
 function sanitizeHtml(html: string): string {
-  return html
-    .replace(
-      new RegExp('<(' + UNSAFE_TAGS + ')[\\s>/][\\s\\S]*?</\\1\\s*>', 'gi'),
-      '',
-    )
-    .replace(new RegExp('</?(?:' + UNSAFE_TAGS + ')\\b[^>]*>', 'gi'), '')
-    .replace(/[\s/]on[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s"'=<>`]+)/gi, '')
-    .replace(
-      /\s(?:xlink:)?(?:href|src|action|formaction)\s*=\s*("[^"]*"|'[^']*'|[^\s"'=<>`]+)/gi,
-      (m, val: string) =>
-        isScriptUrl(val.replace(/^['"]|['"]$/g, '')) ? '' : m,
-    );
+  // Comments and other markup declarations hold no story text, and a quote
+  // inside one must not hide a following tag from the attribute pass.
+  // Repeat until stable so removing one tag cannot splice a new one together.
+  let s = html;
+  for (let prev = ''; prev !== s; ) {
+    prev = s;
+    s = s
+      .replace(/<!--[\s\S]*?(?:--!?>|$)/g, '')
+      .replace(/<!\[CDATA\[[\s\S]*?(?:\]\]>|$)/gi, '')
+      .replace(/<[!?][^>]*>/g, '')
+      .replace(
+        new RegExp('<(' + UNSAFE_TAGS + ')[\\s>/][\\s\\S]*?</\\1\\s*>', 'gi'),
+        '',
+      )
+      .replace(new RegExp('</?(?:' + UNSAFE_TAGS + ')\\b[^>]*>', 'gi'), '');
+  }
+
+  // Walk every tag the way an HTML parser tokenizes it, so an attribute
+  // directly after a quoted value (src="x"onerror=...) is still seen and
+  // text such as "one = 1" is never mistaken for an attribute.
+  const isSpace = (ch: string) => /^[\t\n\f\r ]$/.test(ch);
+  const tagRe = /<\/?[a-z]/gi;
+  let out = '';
+  let pos = 0;
+  let m: RegExpExecArray | null;
+  while ((m = tagRe.exec(s)) !== null) {
+    let i = m.index + m[0].length;
+    while (i < s.length && !isSpace(s[i]) && s[i] !== '/' && s[i] !== '>') i++;
+    out += s.slice(pos, i);
+    for (;;) {
+      const gap = i;
+      while (i < s.length && (isSpace(s[i]) || s[i] === '/')) i++;
+      if (i >= s.length || s[i] === '>') {
+        i = Math.min(i + 1, s.length);
+        out += s.slice(gap, i);
+        break;
+      }
+      const nameStart = i++;
+      while (i < s.length && !/^[\t\n\f\r />=]$/.test(s[i])) i++;
+      const name = s.slice(nameStart, i);
+      let j = i;
+      while (j < s.length && isSpace(s[j])) j++;
+      let value = '';
+      if (s[j] === '=') {
+        j++;
+        while (j < s.length && isSpace(s[j])) j++;
+        const q = s[j];
+        if (q === '"' || q === "'") {
+          const close = s.indexOf(q, j + 1);
+          const end = close < 0 ? s.length : close;
+          value = s.slice(j + 1, end);
+          i = Math.min(end + 1, s.length);
+        } else {
+          const start = j;
+          while (j < s.length && !isSpace(s[j]) && s[j] !== '>') j++;
+          value = s.slice(start, j);
+          i = j;
+        }
+      }
+      out += s.slice(gap, nameStart);
+      if (!isUnsafeAttr(name, value)) out += s.slice(nameStart, i);
+    }
+    pos = i;
+    tagRe.lastIndex = i;
+  }
+  return out + s.slice(pos);
 }
 
 const VOID_TAGS =
@@ -563,9 +634,18 @@ function parseChapterContent(html: string): ChapterContentResult {
       isCreditLine(p) ||
       isDivider(p) ||
       isTitleRepeat(p, titles));
+  // A short line that opens with a known title is header too: the page data
+  // can lack the chapter title the line goes on with ("Series<br>Chapter 88:
+  // Karakula Labyrinth") or the part number it adds ("Title (1)").
+  const normTitles = titles.map(normalizeText).filter(t => t.length > 0);
+  const startsWithTitle = (p: string) => {
+    const t = normalizeText(paragraphText(p.replace(/<br\s*\/?>/gi, ' ')));
+    return normTitles.some(k => t.indexOf(k) === 0);
+  };
   // A bold lead-in only counts as header when it reads like a title line.
   const isHeaderLine = (p: string) =>
     isEdgeJunk(p) ||
+    (paragraphText(p).length <= 250 && startsWithTitle(p)) ||
     (isBoldOnly(p) &&
       /^[◈◆■●\s]*(?:chapter|ch\.?|vol\.?|volume|episode|ep\.?|prologue|epilogue|side story|extra)\b|^[◈◆■●]|[◈◆■●]$/i.test(
         paragraphText(p),
