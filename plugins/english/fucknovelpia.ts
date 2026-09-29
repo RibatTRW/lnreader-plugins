@@ -31,7 +31,12 @@ class FuckNovelpia implements Plugin.PluginBase {
   async fetchHtml(url: string): Promise<string> {
     let response = await fetchApi(url, { headers: this.browserHeaders });
     if (response.status === 429) {
-      const retryAfter = Number(response.headers.get('Retry-After'));
+      // Its 429s usually omit Retry-After, and Number(null) is 0, so parse it
+      // explicitly to keep the fallback wait instead of retrying instantly.
+      const retryAfter = parseInt(
+        response.headers.get('Retry-After') || '',
+        10,
+      );
       const waitMs = (isNaN(retryAfter) ? 2 : Math.min(retryAfter, 10)) * 1000;
       await this.sleep(waitMs);
       response = await fetchApi(url, { headers: this.browserHeaders });
