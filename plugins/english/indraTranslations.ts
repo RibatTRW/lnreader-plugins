@@ -47,7 +47,10 @@ class IndraTranslations implements Plugin.PluginBase {
   }
 
   private relative(url: string): string {
-    return url.replace(/^https?:\/\/(www\.)?indratranslations\.com/, '');
+    return url.replace(
+      /^https?:\/\/(www\.)?indratranslations\.com(?=[/?#]|$)/,
+      '',
+    );
   }
 
   private clean(text: unknown): string {
@@ -138,7 +141,10 @@ class IndraTranslations implements Plugin.PluginBase {
   async parseNovel(novelPath: string): Promise<Plugin.SourceNovel> {
     // Novels used to live under /series/<slug>/; that URL now redirects to
     // the first chapter, so map old library entries to /<slug>/.
-    const sitePath = novelPath.replace(/^\/series\/([^/]+)\/?$/, '/$1/');
+    const sitePath = this.relative(novelPath).replace(
+      /^\/series\/([^/?#]+)\/?(?:[?#].*)?$/,
+      '/$1/',
+    );
     const url = sitePath.startsWith('http') ? sitePath : this.site + sitePath;
     const html = await this.fetchHtml(url);
     const $ = load(html);
@@ -176,7 +182,10 @@ class IndraTranslations implements Plugin.PluginBase {
 
     return {
       name,
-      path: novelPath.endsWith('/') ? novelPath : novelPath + '/',
+      path:
+        novelPath.endsWith('/') || /[?#]/.test(novelPath)
+          ? novelPath
+          : novelPath + '/',
       cover,
       summary: summary || this.clean($('#story-synopsis').text()) || undefined,
       genres: genres || undefined,
@@ -292,7 +301,7 @@ class IndraTranslations implements Plugin.PluginBase {
         { label: 'Fantasy', value: '10' },
         { label: 'Harem', value: '53' },
         { label: 'Horror', value: '16' },
-        { label: 'Madure', value: '33' },
+        { label: 'Mature', value: '33' },
         { label: 'Martial Arts', value: '63' },
         { label: 'Mystery', value: '35' },
         { label: 'Psychological', value: '54' },
