@@ -19,7 +19,12 @@ class AsianFanfics implements Plugin.PluginBase {
       headers: referer ? { Referer: referer } : undefined,
     });
     if (!res.ok) {
-      throw new Error(`Could not reach ${url} (${res.status})`);
+      // Keep the status and response on the error so an anti-bot block is
+      // reported as such rather than as a parsing failure.
+      throw Object.assign(new Error(`Could not reach ${url} (${res.status})`), {
+        status: res.status,
+        response: res,
+      });
     }
     return parseHTML(await res.text());
   }
