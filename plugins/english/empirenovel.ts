@@ -33,13 +33,16 @@ class EmpireNovel implements Plugin.PluginBase {
 
   // Throw (carrying the HTTP status) on a refused response so a
   // Cloudflare challenge is reported instead of being parsed into a
-  // false empty result.
+  // false empty result. The whole site sits behind a managed challenge,
+  // which answers 403/503 until it is solved in WebView.
   private async fetchSite(url: string) {
     const res = await fetchApi(url);
     if (!res.ok) {
-      throw Object.assign(new Error('Request failed: ' + res.status), {
-        status: res.status,
-      });
+      const message =
+        res.status === 403 || res.status === 503
+          ? 'Cloudflare protection detected (HTTP error). Please try opening the plugin in WebView first to solve the challenge.'
+          : 'Request failed: ' + res.status;
+      throw Object.assign(new Error(message), { status: res.status });
     }
     return res;
   }
