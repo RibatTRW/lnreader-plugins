@@ -451,6 +451,7 @@ export class LightNovelWPPlugin implements Plugin.PluginBase {
     if (!content.length) return '';
 
     content.find('script, style, noscript').remove();
+    const pageUrl = this.site + chapterPath;
     content.find('img').each((_, el) => {
       const img = $(el);
       let src = img.attr('src');
@@ -458,9 +459,38 @@ export class LightNovelWPPlugin implements Plugin.PluginBase {
         src = img.attr('data-lazy-src') || img.attr('data-src') || src;
       }
       if (!src) return;
-      if (src.startsWith('//')) src = 'https:' + src;
-      else if (src.startsWith('/')) src = this.site.replace(/\/$/, '') + src;
+      // Resolve relative paths against the chapter page, as a browser would.
+      if (!/^[a-z][a-z\d+.-]*:/i.test(src)) {
+        try {
+          src = new URL(src, pageUrl).href;
+        } catch {
+          return;
+        }
+      }
       img.attr('src', src);
+    });
+
+    // The app renders this HTML as is, so drop event handlers and URLs that
+    // would run script.
+    content.find('*').each((_, el) => {
+      const node = $(el);
+      for (const name of Object.keys(el.attribs)) {
+        if (/^on/i.test(name)) {
+          node.removeAttr(name);
+        } else if (name === 'href' || name === 'src') {
+          const value = el.attribs[name]
+            .split('')
+            .filter(c => c.charCodeAt(0) > 32)
+            .join('')
+            .toLowerCase();
+          if (
+            /^(javascript|vbscript):/.test(value) ||
+            (value.startsWith('data:') && !value.startsWith('data:image/'))
+          ) {
+            node.removeAttr(name);
+          }
+        }
+      }
     });
 
     // Keep paragraphs as HTML so inline formatting and images inside them
