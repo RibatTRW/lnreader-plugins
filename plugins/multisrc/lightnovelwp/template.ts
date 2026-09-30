@@ -42,7 +42,7 @@ export class LightNovelWPPlugin implements Plugin.PluginBase {
     this.icon = `multisrc/lightnovelwp/${metadata.id.toLowerCase()}/icon.png`;
     this.site = metadata.sourceSite;
     const versionIncrements = metadata.options?.versionIncrements || 0;
-    this.version = `1.1.${10 + versionIncrements}`;
+    this.version = `1.1.${11 + versionIncrements}`;
     this.options = metadata.options ?? ({} as LightNovelWPOptions);
     this.filters = metadata.filters satisfies Filters;
 
@@ -438,64 +438,45 @@ export class LightNovelWPPlugin implements Plugin.PluginBase {
         throw error;
       }
     }
-    // The chapter text lives in the `epcontent` block. Older child themes
-    // closed it with a `bottomnav` div, but that wrapper is gone on current
-    // ones, so anchoring on it silently returned an empty chapter.
-    //
-    // Walk the markup with the parser rather than cutting the document with a
-    // regex: the block has to end at the element that closes it, and any
-    // landmark guessed from the surrounding text is wrong on some site. A
-    // <script> inside the block is prose-adjacent, not the end of it, so
-    // treating the first one as a boundary truncates the chapter.
-    let depth = 0;
-    let inside = false;
-    let found = false;
-    let isReadingParagraph = false;
-    let paragraph = '';
-    const paragraphs: string[] = [];
-
-    const parser = new Parser({
-      onopentag(name, attribs) {
-        if (name === 'div' && !inside) {
-          const className = attribs['class'] || '';
-          if (/(^|\s)epcontent(\s|$)/.test(className)) {
-            inside = true;
-            found = true;
-            depth = 1;
-          }
-          return;
-        }
-        if (!inside) return;
-        if (name === 'div') depth++;
-        else if (name === 'p') isReadingParagraph = true;
-      },
-      ontext(text) {
-        if (inside && isReadingParagraph && text.trim()) {
-          paragraph += text;
-        }
-      },
-      onclosetag(name) {
-        if (!inside) return;
-        if (name === 'p') {
-          if (paragraph.trim()) paragraphs.push(paragraph.trim());
-          paragraph = '';
-          isReadingParagraph = false;
-        } else if (name === 'div') {
-          depth--;
-          if (depth === 0) inside = false;
-        }
-      },
-    });
-
-    parser.write(data);
-    parser.end();
+    // The chapter lives in the `epcontent` block. Older child themes closed
+    // it with a `bottomnav` div, but that wrapper is gone on current ones, so
+    // select the element itself rather than cutting the document between
+    // landmarks: a <script> inside the block then cannot end it early either.
+    const $ = load(data);
+    const content = $('div.epcontent').first();
 
     // No epcontent block means this was not a chapter page (a login wall or
     // an error page served with 200). Returning the whole document here would
     // show that page's text as the chapter, so report nothing instead.
-    if (!found) return '';
+    if (!content.length) return '';
 
-    return paragraphs.join('\n');
+    content.find('script, style, noscript').remove();
+    content.find('img').each((_, el) => {
+      const img = $(el);
+      let src = img.attr('src');
+      if (!src || src.startsWith('data:')) {
+        src = img.attr('data-lazy-src') || img.attr('data-src') || src;
+      }
+      if (!src) return;
+      if (src.startsWith('//')) src = 'https:' + src;
+      else if (src.startsWith('/')) src = this.site.replace(/\/$/, '') + src;
+      img.attr('src', src);
+    });
+
+    // Keep paragraphs as HTML so inline formatting and images inside them
+    // survive, plus images outside any paragraph: illustration chapters hold
+    // only images, sometimes in bare <div>s with no <p> at all.
+    const blocks: string[] = [];
+    content.find('p, img').each((_, el) => {
+      const node = $(el);
+      if (node.is('img')) {
+        if (!node.parents('p').length) blocks.push($.html(node));
+      } else if (node.text().trim() || node.find('img').length) {
+        blocks.push($.html(node));
+      }
+    });
+
+    return blocks.join('\n');
   }
   async searchNovels(
     searchTerm: string,
