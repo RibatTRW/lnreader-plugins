@@ -49,8 +49,22 @@ type LdBook = {
   name?: string;
   description?: string;
   image?: string;
-  author?: { name?: string }[];
+  author?: unknown;
 };
+
+/** JSON-LD `author` may be an array, a single Person object, or a string. */
+function ldAuthorNames(author: unknown): string[] {
+  const list = Array.isArray(author) ? author : author ? [author] : [];
+  return list
+    .map(a => {
+      if (typeof a === 'string') return a.trim();
+      if (a && typeof a === 'object' && typeof a.name === 'string') {
+        return a.name.trim();
+      }
+      return '';
+    })
+    .filter(Boolean);
+}
 
 /**
  * The search API pages with an opaque cursor that is base64 of
@@ -196,9 +210,7 @@ class ReChapters implements Plugin.PluginBase {
       name: $('h1').first().text().trim() || ld.name || 'Untitled',
       cover: ld.image || defaultCover,
     };
-    const authors = (ld.author || [])
-      .map(a => (a.name || '').trim())
-      .filter(Boolean);
+    const authors = ldAuthorNames(ld.author);
     if (authors.length) novel.author = authors.join(', ');
     if (ld.description) novel.summary = ld.description.trim();
 
