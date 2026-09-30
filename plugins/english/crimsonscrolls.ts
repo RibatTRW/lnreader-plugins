@@ -246,12 +246,15 @@ class CrimsonScrollsPlugin implements Plugin.PluginBase {
     return content.html() || '';
   }
 
-  resolveUrl = (path: string, isNovel?: boolean) =>
+  resolveUrl = (path: string, isNovel?: boolean) => {
+    if (/^https?:\/\//i.test(path)) return path;
+    if (path.startsWith('//')) return `https:${path}`;
     // Chapters saved by versions before 1.1.0 store only the chapter slug;
     // the site redirects /chapter/<slug>/ to the chapter's current URL.
-    !isNovel && !path.includes('/')
+    return !isNovel && !path.includes('/')
       ? `${this.site}/chapter/${path}/`
       : `${this.site}/${path}`;
+  };
 
   filters = {
     sort: {
