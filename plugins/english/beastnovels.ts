@@ -56,9 +56,29 @@ class BeastNovels implements Plugin.PluginBase {
 
   private async fetchCatalog(): Promise<BeastBook[]> {
     const html = await this.fetchText(this.site + 'novels');
-    const match = html.match(/allBooks:\s*(\[.*\]),\s*\n/);
-    if (!match) throw new Error('Could not find the novel catalog');
-    return JSON.parse(match[1]);
+    const marker = html.search(/allBooks\s*:\s*\[/);
+    if (marker === -1) throw new Error('Could not find the novel catalog');
+    const start = html.indexOf('[', marker);
+
+    // Find the matching `]` while skipping brackets inside JSON strings,
+    // so the parse does not depend on the array's layout or what follows.
+    let depth = 0;
+    let inString = false;
+    for (let i = start; i < html.length; i++) {
+      const ch = html[i];
+      if (inString) {
+        if (ch === '\\') i++;
+        else if (ch === '"') inString = false;
+      } else if (ch === '"') {
+        inString = true;
+      } else if (ch === '[' || ch === '{') {
+        depth++;
+      } else if (ch === ']' || ch === '}') {
+        depth--;
+        if (depth === 0) return JSON.parse(html.slice(start, i + 1));
+      }
+    }
+    throw new Error('Could not parse the novel catalog');
   }
 
   private toNovelItem(book: BeastBook): Plugin.NovelItem {
@@ -100,9 +120,11 @@ class BeastNovels implements Plugin.PluginBase {
   }
 
   async parseNovel(novelPath: string): Promise<Plugin.SourceNovel> {
+    // The catalog only supplies the status, so a failed catalog request
+    // must not stop the novel page from loading.
     const [html, catalog] = await Promise.all([
       this.fetchText(this.site + novelPath),
-      this.fetchCatalog(),
+      this.fetchCatalog().catch((): BeastBook[] => []),
     ]);
     const $ = parseHTML(html);
 
@@ -149,6 +171,19 @@ class BeastNovels implements Plugin.PluginBase {
     return novel;
   }
 
+  // Browsers ignore ASCII control characters and whitespace inside a URL
+  // scheme (`java&#10;script:`), so drop them before checking the scheme.
+  // The parser has already decoded entities in attribute values.
+  private isUnsafeUrl(value: string): boolean {
+    // eslint-disable-next-line no-control-regex
+    const url = value.replace(/[\u0000- \u007f]/g, '').toLowerCase();
+    return (
+      url.startsWith('javascript:') ||
+      url.startsWith('vbscript:') ||
+      (url.startsWith('data:') && !url.startsWith('data:image/'))
+    );
+  }
+
   async parseChapter(chapterPath: string): Promise<string> {
     const html = await this.fetchText(this.site + chapterPath);
     const $ = parseHTML(html);
@@ -157,8 +192,7 @@ class BeastNovels implements Plugin.PluginBase {
     content.find('*').each((_, el) => {
       if (el.type !== 'tag') return;
       for (const attr of Object.keys(el.attribs)) {
-        const value = el.attribs[attr];
-        if (/^on/i.test(attr) || /^\s*javascript:/i.test(value)) {
+        if (/^on/i.test(attr) || this.isUnsafeUrl(el.attribs[attr])) {
           $(el).removeAttr(attr);
         }
       }
