@@ -168,11 +168,15 @@ class AsianFanfics implements Plugin.PluginBase {
     return html;
   }
 
-  // Returns the fragment's chapter body without scripts, event handlers or
-  // javascript: URLs.
+  // Returns the fragment's chapter body without scripts, stylesheets, inline
+  // styles, event handlers or javascript: URLs. The body is author-written, so
+  // inline styles could otherwise lay content over the reader.
   cleanHtml($: CheerioAPI): string {
     const content = $('#user-submitted-body');
-    content.find('script, style, iframe, object, embed, form').remove();
+    content
+      .find('script, style, link, meta, iframe, object, embed, form')
+      .remove();
+    content.find('[style]').removeAttr('style');
     content.find('*').each((_, ele) => {
       if (ele.type !== 'tag') return;
       for (const name of Object.keys(ele.attribs)) {
