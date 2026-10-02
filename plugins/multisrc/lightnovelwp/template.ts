@@ -42,7 +42,7 @@ export class LightNovelWPPlugin implements Plugin.PluginBase {
     this.icon = `multisrc/lightnovelwp/${metadata.id.toLowerCase()}/icon.png`;
     this.site = metadata.sourceSite;
     const versionIncrements = metadata.options?.versionIncrements || 0;
-    this.version = `1.2.${10 + versionIncrements}`;
+    this.version = `1.2.${11 + versionIncrements}`;
     this.options = metadata.options ?? ({} as LightNovelWPOptions);
     this.filters = metadata.filters satisfies Filters;
 
@@ -444,24 +444,83 @@ export class LightNovelWPPlugin implements Plugin.PluginBase {
         throw error;
       }
     }
-
-    // The body is the theme's `.epcontent` block, which newer installs render
-    // as an <article> instead of a <div> and no longer close with
-    // `<div class="bottomnav">`. The old regex sliced the raw document between
-    // those two wrappers, so both of those changes emptied every chapter;
-    // select the body itself and read its paragraphs instead.
+    // The chapter lives in the `epcontent` block, which newer installs render
+    // as an <article> instead of a <div> and no longer close with a
+    // `bottomnav` div, so select the element itself rather than cutting the
+    // document between landmarks: a <script> inside the block then cannot end
+    // it early either.
     const $ = load(data);
-    const chapterText = $('.epcontent')
-      .first()
-      .find('p')
-      .map((_, el) => $.html(el) || '')
-      .get()
-      .join('\n');
-    if (!chapterText)
+    const content = $('.epcontent').first();
+
+    // No epcontent block means this was not a chapter page (a login wall or
+    // an error page served with 200). Returning the whole document here would
+    // show that page's text as the chapter, so fail instead.
+    if (!content.length)
       throw new Error(
         'Chapter text not found on the page, try to open in webview.',
       );
-    return chapterText;
+
+    content.find('script, style, noscript').remove();
+    const pageUrl = this.site + chapterPath;
+    content.find('img').each((_, el) => {
+      const img = $(el);
+      let src = img.attr('src');
+      if (!src || src.startsWith('data:')) {
+        src = img.attr('data-lazy-src') || img.attr('data-src') || src;
+      }
+      if (!src) return;
+      // Resolve relative paths against the chapter page, as a browser would.
+      if (!/^[a-z][a-z\d+.-]*:/i.test(src)) {
+        try {
+          src = new URL(src, pageUrl).href;
+        } catch {
+          return;
+        }
+      }
+      img.attr('src', src);
+    });
+
+    // The app renders this HTML as is, so drop event handlers and URLs that
+    // would run script.
+    content.find('*').each((_, el) => {
+      const node = $(el);
+      for (const name of Object.keys(el.attribs)) {
+        if (/^on/i.test(name)) {
+          node.removeAttr(name);
+        } else if (name === 'href' || name === 'src') {
+          const value = el.attribs[name]
+            .split('')
+            .filter(c => c.charCodeAt(0) > 32)
+            .join('')
+            .toLowerCase();
+          if (
+            /^(javascript|vbscript):/.test(value) ||
+            (value.startsWith('data:') && !value.startsWith('data:image/'))
+          ) {
+            node.removeAttr(name);
+          }
+        }
+      }
+    });
+
+    // Keep paragraphs as HTML so inline formatting and images inside them
+    // survive, plus images outside any paragraph: illustration chapters hold
+    // only images, sometimes in bare <div>s with no <p> at all.
+    const blocks: string[] = [];
+    content.find('p, img').each((_, el) => {
+      const node = $(el);
+      if (node.is('img')) {
+        if (!node.parents('p').length) blocks.push($.html(node));
+      } else if (node.text().trim() || node.find('img').length) {
+        blocks.push($.html(node));
+      }
+    });
+
+    if (!blocks.length)
+      throw new Error(
+        'Chapter text not found on the page, try to open in webview.',
+      );
+    return blocks.join('\n');
   }
 
   async searchNovels(
