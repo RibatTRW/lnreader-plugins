@@ -38,6 +38,8 @@ const MONTHS = [
   'aralık',
 ];
 
+const COMPLETED = /cevirisi tamamlan(?:mistir|di)(?![a-z])/;
+
 const normalize = (text: string) =>
   text
     .toLowerCase()
@@ -168,7 +170,8 @@ class ReZeroTurkce implements Plugin.PluginBase {
       if (text) summary.push(text);
     }
     if (summary.length) novel.summary = summary.join('\n\n');
-    if (/cevirisi tamamlan/.test(normalize(article.find('h2').text())))
+    // Only "tamamlanmıştır"/"tamamlandı" (completed), not "tamamlanmadı" etc.
+    if (COMPLETED.test(normalize(article.find('h2').text())))
       novel.status = NovelStatus.Completed;
 
     // The reading-progress table carries each chapter's publication date.
@@ -231,6 +234,13 @@ class ReZeroTurkce implements Plugin.PluginBase {
         /^\[adinserter[^\]]*\]$/.test(cleanText($(el).text())),
       )
       .remove();
+    // Drop inline event handlers and script URLs from the site's markup.
+    content.find('*').each((_i, el) => {
+      for (const [name, value] of Object.entries(el.attribs)) {
+        if (/^on/i.test(name) || /^\s*javascript:/i.test(value))
+          $(el).removeAttr(name);
+      }
+    });
     return content.html() || '';
   }
 
