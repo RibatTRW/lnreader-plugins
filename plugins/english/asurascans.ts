@@ -47,7 +47,6 @@ class AsuraScansPlugin implements Plugin.PluginBase {
   apiUrl = 'https://api.asurascans.com/api';
   version = '1.0.0';
 
-  hideLocked = storage.get('hideLocked');
   pluginSettings = {
     hideLocked: {
       value: '',
@@ -139,8 +138,9 @@ class AsuraScansPlugin implements Plugin.PluginBase {
       if (!novel.summary) novel.summary = $.root().text().trim();
     }
 
+    const hideLocked = storage.get('hideLocked');
     novel.chapters = chapters
-      .filter(chapter => !(chapter.is_locked && this.hideLocked))
+      .filter(chapter => !(chapter.is_locked && hideLocked))
       .map(chapter => {
         const title = chapter.title?.trim();
         const name = `Chapter ${chapter.number}${title ? `: ${title}` : ''}`;
@@ -169,17 +169,31 @@ class AsuraScansPlugin implements Plugin.PluginBase {
       );
     }
 
-    const $ = parseHTML(chapter.content_html);
-    // Some chapters end with a paragraph of leaked site navigation text.
-    $('p')
-      .filter((_, el) => $(el).text().includes('Back to homepage'))
-      .remove();
+    return this.cleanChapter(chapter.content_html);
+  }
+
+  cleanChapter(html: string): string {
+    const $ = parseHTML(html);
+    // Some chapters end with a paragraph of leaked site navigation and report
+    // dialog text. Only trailing paragraphs carrying both markers are dropped.
+    let last = $('p').last();
+    while (
+      last.length &&
+      last.text().includes('Back to homepage') &&
+      last.text().includes('Reporting chapter:')
+    ) {
+      last.remove();
+      last = $('p').last();
+    }
     $('script, style, iframe').remove();
 
     return $('body').html() || '';
   }
 
-  resolveUrl = (path: string) => `${this.site}/${path}`;
+  resolveUrl = (path: string) =>
+    /^https?:\/\//i.test(path)
+      ? path
+      : `${this.site}/${path.replace(/^\/+/, '')}`;
 
   filters = {
     sort: {
