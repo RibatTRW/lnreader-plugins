@@ -1,5 +1,5 @@
 import { Plugin } from '@/types/plugin';
-import { fetchApi } from '@libs/fetch';
+import { FetchInit, fetchApi } from '@libs/fetch';
 import { FilterTypes, Filters } from '@libs/filterInputs';
 import { CheerioAPI, load as parseHTML } from 'cheerio';
 import { gcm } from '@libs/aes';
@@ -53,7 +53,7 @@ class WTRLAB implements Plugin.PluginBase {
   id = 'WTRLAB';
   name = 'WTR-LAB';
   site = 'https://wtr-lab.com/';
-  version = '1.2.5';
+  version = '1.2.6';
   icon = 'src/en/wtrlab/icon.png';
   sourceLang = 'en/';
   baggage = '';
@@ -104,6 +104,24 @@ class WTRLAB implements Plugin.PluginBase {
   /** Full Cookie header value supplied by the user in plugin settings. */
   get sessionCookie(): string {
     return (storage.get<string>('sessionCookie') || '').trim();
+  }
+
+  /**
+   * Fetch a wtr-lab page or JSON route, refusing a Cloudflare challenge.
+   *
+   * The whole site sits behind a managed challenge that answers 403 with a
+   * "Just a moment..." page until it is solved in WebView. Parsing that page
+   * as wtr-lab markup used to surface as "Could not find __NEXT_DATA__" or a
+   * JSON syntax error, which hid the actual fix from the user.
+   */
+  async fetchSite(url: string, init?: FetchInit): Promise<Response> {
+    const res = await fetchApi(url, init);
+    if (res.status === 403 || res.status === 503) {
+      throw new Error(
+        `Cloudflare protection detected (HTTP ${res.status}). Please open the plugin in WebView to solve the challenge, then try again.`,
+      );
+    }
+    return res;
   }
 
   /**
@@ -348,7 +366,7 @@ class WTRLAB implements Plugin.PluginBase {
     }
 
     if (showLatestNovels) {
-      const response = await fetchApi(this.site + 'api/home/recent', {
+      const response = await this.fetchSite(this.site + 'api/home/recent', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -374,9 +392,9 @@ class WTRLAB implements Plugin.PluginBase {
 
       return novels;
     } else {
-      const finderPage = await fetchApi(this.site + 'en/novel-finder').then(
-        res => res.text(),
-      );
+      const finderPage = await this.fetchSite(
+        this.site + 'en/novel-finder',
+      ).then(res => res.text());
       const finderCheerio = parseHTML(finderPage);
       const nextData = finderCheerio('#__NEXT_DATA__').html();
       if (!nextData) {
@@ -386,7 +404,7 @@ class WTRLAB implements Plugin.PluginBase {
 
       link = `${this.site}_next/data/${buildId}/en/novel-finder.json?${params.toString()}`;
 
-      const response = await fetchApi(link);
+      const response = await this.fetchSite(link);
       const json = await response.json();
       const seenIds = new Set();
 
@@ -419,7 +437,9 @@ class WTRLAB implements Plugin.PluginBase {
   }
 
   async parseNovel(novelPath: string): Promise<Plugin.SourceNovel> {
-    const body = await fetchApi(this.site + novelPath).then(res => res.text());
+    const body = await this.fetchSite(this.site + novelPath).then(res =>
+      res.text(),
+    );
     const loadedCheerio = parseHTML(body);
 
     const baggage = loadedCheerio('meta[name="baggage"]').attr('content');
@@ -479,8 +499,8 @@ class WTRLAB implements Plugin.PluginBase {
     if (!novel.name) {
       novel.name = resolveTokens(
         loadedCheerio('h1.text-uppercase').text() ||
-        loadedCheerio('h1.long-title').text() ||
-        loadedCheerio('.title-wrap h1').text().trim(),
+          loadedCheerio('h1.long-title').text() ||
+          loadedCheerio('.title-wrap h1').text().trim(),
       );
     }
 
@@ -493,8 +513,8 @@ class WTRLAB implements Plugin.PluginBase {
     if (!novel.summary) {
       novel.summary = resolveTokens(
         loadedCheerio('.description').text().trim() ||
-        loadedCheerio('.desc-wrap .description').text().trim() ||
-        loadedCheerio('.lead').text().trim(),
+          loadedCheerio('.desc-wrap .description').text().trim() ||
+          loadedCheerio('.lead').text().trim(),
       );
     }
 
@@ -526,8 +546,7 @@ class WTRLAB implements Plugin.PluginBase {
 
         if (Array.isArray(pageProps?.tags)) {
           for (const tag of pageProps.tags) {
-            const title =
-              tag?.title && resolveTokens(String(tag.title).trim());
+            const title = tag?.title && resolveTokens(String(tag.title).trim());
             if (title) labels.push(title);
           }
         }
@@ -753,7 +772,7 @@ class WTRLAB implements Plugin.PluginBase {
     }
 
     if (!rawId || !chapterNo) {
-      const body = await fetchApi(url).then(res => res.text());
+      const body = await this.fetchSite(url).then(res => res.text());
 
       loadedCheerio = parseHTML(body);
       const chapterJson = loadedCheerio('#__NEXT_DATA__').html() + '';
