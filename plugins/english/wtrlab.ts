@@ -35,6 +35,7 @@ function resolveTokens(
 ): string {
   if (!str) return '';
   return str.replace(
+    // eslint-disable-next-line no-control-regex
     /%\{(?:"([^"]*)":\s*"?([A-Za-z0-9+/=_-]+)"?|([^|{}%\u0000-\u001F\u007F\u2028\u2029]+?)\s*\|\s*([A-Za-z0-9+/=_-]+))\}/g,
     (match, safe1, b64_1, safe2, b64_2) => {
       const safe = (safe1 ?? safe2 ?? '').trim();
