@@ -623,6 +623,7 @@ class WTRLAB implements Plugin.PluginBase {
       try {
         chapters = await this.fetchAllChapters(rawId, slug);
       } catch (error) {
+        if (String(error).includes('Cloudflare protection')) throw error;
         console.error('Failed to fetch chapters via API:', error);
         chapters = [];
       }
@@ -658,7 +659,7 @@ class WTRLAB implements Plugin.PluginBase {
         combined = new Uint8Array(ciphertext.length + tag.length);
 
       // Make the ciphertext + tag format expected for decryption
-      (combined.set(ciphertext), combined.set(tag, ciphertext.length));
+      combined.set(ciphertext), combined.set(tag, ciphertext.length);
 
       // Decrypt with encKey
       // Convert the key to bytes (first 32 characters of encKey)
@@ -1080,6 +1081,7 @@ class WTRLAB implements Plugin.PluginBase {
 
         start += batchSize;
       } catch (error) {
+        if (String(error).includes('Cloudflare protection')) throw error;
         console.error(`Failed to fetch chapters ${start}-${end}:`, error);
         hasMore = false;
         break;
