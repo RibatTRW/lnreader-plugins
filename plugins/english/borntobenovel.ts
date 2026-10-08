@@ -75,12 +75,29 @@ class BornToBeNovel implements Plugin.PluginBase {
   site = 'https://borntobenovel.com';
   version = '1.0.0';
 
-  private async fetchHtml(path: string) {
-    const res = await fetchApi(this.site + path);
+  private async fetchPage(path: string): Promise<string> {
+    const res = await fetchApi(this.site + path, {
+      headers: {
+        'User-Agent':
+          'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36',
+        'Accept':
+          'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Referer': this.site + '/',
+      },
+    });
     if (!res.ok) {
-      throw new Error('Could not load ' + path + ' (HTTP ' + res.status + ')');
+      const error = new Error(
+        'Could not load ' + path + ' (HTTP ' + res.status + ')',
+      ) as Error & { status: number };
+      error.status = res.status;
+      throw error;
     }
-    return parseHTML(await res.text());
+    return res.text();
+  }
+
+  private async fetchHtml(path: string) {
+    return parseHTML(await this.fetchPage(path));
   }
 
   private async fetchCatalog(): Promise<
@@ -165,11 +182,7 @@ class BornToBeNovel implements Plugin.PluginBase {
 
   async parseNovel(novelPath: string): Promise<Plugin.SourceNovel> {
     const path = novelPath.endsWith('/') ? novelPath : novelPath + '/';
-    const res = await fetchApi(this.site + path);
-    if (!res.ok) {
-      throw new Error('Could not load ' + path + ' (HTTP ' + res.status + ')');
-    }
-    const html = await res.text();
+    const html = await this.fetchPage(path);
     if (!html.trim()) {
       throw new Error('The site returned an empty page for ' + path);
     }
@@ -248,13 +261,7 @@ class BornToBeNovel implements Plugin.PluginBase {
   }
 
   async parseChapter(chapterPath: string): Promise<string> {
-    const res = await fetchApi(this.site + chapterPath);
-    if (!res.ok) {
-      throw new Error(
-        'Could not load chapter (HTTP ' + res.status + '): ' + chapterPath,
-      );
-    }
-    const html = await res.text();
+    const html = await this.fetchPage(chapterPath);
     const match = html.match(/const contentData = '([^']*)'/);
     if (!match || !match[1]) {
       throw new Error('Chapter text not found: ' + chapterPath);
