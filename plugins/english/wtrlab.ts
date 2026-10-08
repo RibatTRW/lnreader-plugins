@@ -107,18 +107,38 @@ class WTRLAB implements Plugin.PluginBase {
   }
 
   /**
-   * Fetch a wtr-lab page or JSON route, refusing a Cloudflare challenge.
+   * Throw a WebView hint when Cloudflare answered with its managed challenge.
    *
-   * The whole site sits behind a managed challenge that answers 403 with a
-   * "Just a moment..." page until it is solved in WebView. Parsing that page
-   * as wtr-lab markup used to surface as "Could not find __NEXT_DATA__" or a
-   * JSON syntax error, which hid the actual fix from the user.
+   * The whole site sits behind a challenge that answers with a
+   * "Just a moment..." page, marked `cf-mitigated: challenge`, until it is
+   * solved in WebView. Parsing that page as wtr-lab markup used to surface as
+   * "Could not find __NEXT_DATA__" or a JSON syntax error, which hid the
+   * actual fix from the user. The header is the only rule used, so a plain
+   * 403/503 from the origin is not mistaken for a challenge.
+   */
+  assertNotChallenged(res: Response): void {
+    if (res.headers.get('cf-mitigated') === 'challenge') {
+      throw Object.assign(
+        new Error(
+          `Cloudflare protection detected (HTTP ${res.status}). Please open the plugin in WebView to solve the challenge, then try again.`,
+        ),
+        { status: res.status },
+      );
+    }
+  }
+
+  /**
+   * Fetch a wtr-lab page or JSON route whose failure leaves nothing to parse:
+   * a challenge gets the WebView hint, any other failed response a plain
+   * error naming the status and URL.
    */
   async fetchSite(url: string, init?: FetchInit): Promise<Response> {
     const res = await fetchApi(url, init);
-    if (res.status === 403 || res.status === 503) {
-      throw new Error(
-        `Cloudflare protection detected (HTTP ${res.status}). Please open the plugin in WebView to solve the challenge, then try again.`,
+    this.assertNotChallenged(res);
+    if (!res.ok) {
+      throw Object.assign(
+        new Error(`Request failed (HTTP ${res.status}): ${url}`),
+        { status: res.status },
       );
     }
     return res;
@@ -162,6 +182,7 @@ class WTRLAB implements Plugin.PluginBase {
         ...(cookie && sameSite ? { Cookie: cookie } : {}),
       },
     });
+    this.assertNotChallenged(res);
     const text = await res.text();
     try {
       return JSON.parse(text)?.data?.data ?? null;
@@ -219,6 +240,7 @@ class WTRLAB implements Plugin.PluginBase {
           'Referer': this.site,
         },
       });
+      this.assertNotChallenged(res);
       const landedOn = (res.url || '').replace(this.site, '/') || 'unknown';
       return `Sign-in: redeem token HTTP ${res.status}, ended at ${landedOn}`;
     } catch (e) {
@@ -239,6 +261,7 @@ class WTRLAB implements Plugin.PluginBase {
           ...(cookie ? { Cookie: cookie } : {}),
         },
       });
+      this.assertNotChallenged(res);
       const text = await res.text();
       let body = null;
       try {
@@ -427,9 +450,10 @@ class WTRLAB implements Plugin.PluginBase {
   }
 
   async fetchTokens() {
-    const body = await this.fetchSite(this.site + this.sourceLang).then(res =>
-      res.text(),
-    );
+    // Missing tokens are not fatal, so only a challenge stops here.
+    const res = await fetchApi(this.site + this.sourceLang);
+    this.assertNotChallenged(res);
+    const body = await res.text();
     const $ = parseHTML(body);
 
     this.baggage = $('meta[name="baggage"]').attr('content') ?? '';
@@ -718,7 +742,9 @@ class WTRLAB implements Plugin.PluginBase {
     }
 
     for (const src of URLs) {
-      const script = await this.fetchSite(`${this.site}${src}`);
+      // A failed script just moves on to the next one; a challenge won't pass.
+      const script = await fetchApi(`${this.site}${src}`);
+      this.assertNotChallenged(script);
       const raw = await script.text();
       index = raw.indexOf(searchKey);
       if (index >= 0) {
@@ -821,11 +847,7 @@ class WTRLAB implements Plugin.PluginBase {
         }),
       });
 
-      if (apiResponse.headers.get('cf-mitigated') === 'challenge') {
-        throw new Error(
-          `Cloudflare protection detected (HTTP ${apiResponse.status}). Please open the plugin in WebView to solve the challenge, then try again.`,
-        );
-      }
+      this.assertNotChallenged(apiResponse);
 
       // Read as text first: an auth redirect or a Cloudflare challenge returns
       // HTML, and .json() would throw before we could report what came back.
@@ -930,7 +952,7 @@ class WTRLAB implements Plugin.PluginBase {
       chapterContent.toString().startsWith('str:')
     ) {
       if (!loadedCheerio) {
-        const body = await fetchApi(url).then(res => res.text());
+        const body = await this.fetchSite(url).then(res => res.text());
 
         loadedCheerio = parseHTML(body);
       }
