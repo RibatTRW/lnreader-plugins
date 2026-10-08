@@ -427,7 +427,7 @@ class WTRLAB implements Plugin.PluginBase {
   }
 
   async fetchTokens() {
-    const body = await fetchApi(this.site + this.sourceLang).then(res =>
+    const body = await this.fetchSite(this.site + this.sourceLang).then(res =>
       res.text(),
     );
     const $ = parseHTML(body);
@@ -658,7 +658,7 @@ class WTRLAB implements Plugin.PluginBase {
         combined = new Uint8Array(ciphertext.length + tag.length);
 
       // Make the ciphertext + tag format expected for decryption
-      combined.set(ciphertext), combined.set(tag, ciphertext.length);
+      (combined.set(ciphertext), combined.set(tag, ciphertext.length));
 
       // Decrypt with encKey
       // Convert the key to bytes (first 32 characters of encKey)
@@ -717,7 +717,7 @@ class WTRLAB implements Plugin.PluginBase {
     }
 
     for (const src of URLs) {
-      const script = await fetchApi(`${this.site}${src}`);
+      const script = await this.fetchSite(`${this.site}${src}`);
       const raw = await script.text();
       index = raw.indexOf(searchKey);
       if (index >= 0) {
@@ -819,6 +819,12 @@ class WTRLAB implements Plugin.PluginBase {
           force_retry: false,
         }),
       });
+
+      if (apiResponse.headers.get('cf-mitigated') === 'challenge') {
+        throw new Error(
+          `Cloudflare protection detected (HTTP ${apiResponse.status}). Please open the plugin in WebView to solve the challenge, then try again.`,
+        );
+      }
 
       // Read as text first: an auth redirect or a Cloudflare challenge returns
       // HTML, and .json() would throw before we could report what came back.
@@ -1035,7 +1041,7 @@ class WTRLAB implements Plugin.PluginBase {
       const end = start + batchSize - 1;
 
       try {
-        const response = await fetchApi(
+        const response = await this.fetchSite(
           `${this.site}api/chapters/${rawId}?start=${start}&end=${end}`,
           {
             headers: {
