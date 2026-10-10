@@ -305,12 +305,13 @@ class RoyalRoad implements Plugin.PluginBase {
   async parsePage(novelPath: string, page: string): Promise<Plugin.SourcePage> {
     const result = await fetchApi(this.site + novelPath);
     const chapters = this.parseChapters(await result.text());
-    const pageChapters = chapters.filter(
-      chapter => (chapter.page || '1') === page,
-    );
-    // The app shows a single volume as page "1", so return the whole list then.
+    // Page "1" is asked for when the app has no stored pages at all, so give it
+    // the whole list; any other page is a volume title.
     return {
-      chapters: pageChapters.length || page !== '1' ? pageChapters : chapters,
+      chapters:
+        page === '1'
+          ? chapters
+          : chapters.filter(chapter => chapter.page === page),
     };
   }
 
