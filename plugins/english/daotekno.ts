@@ -32,18 +32,46 @@ import { defaultCover } from '@libs/defaultCover';
 class DaoTekno implements Plugin.PluginBase {
   id = 'daotekno';
   name = 'DaoTekno';
-  version = '1.0.2';
+  version = '1.0.3';
   icon = 'src/en/daotekno/icon.png';
   site = 'https://daotekno.com/';
+
+  // Cloudflare rate-limits the site to about four requests per ten seconds
+  // (HTTP 429, error 1015, with a Retry-After of a few seconds). A novel
+  // with more than 800 chapters needs five or more chapter-list pages, so
+  // wait out each 429 instead of failing the whole novel.
+  private readonly maxRateLimitRetries = 4;
+  private readonly maxRetryAfterSeconds = 30;
+
+  private retryAfterMs(res: Response): number | null {
+    const seconds = parseInt(res.headers.get('retry-after') ?? '', 10);
+    if (!Number.isFinite(seconds) || seconds < 0) return 10000;
+    if (seconds > this.maxRetryAfterSeconds) return null;
+    return (seconds + 1) * 1000;
+  }
 
   // Throw (carrying the HTTP status) on a refused response so a
   // runner-side block is reported INCONCLUSIVE per docs/testing.md
   // instead of being parsed into a false empty-result FAIL.
   private async fetchHtml(url: string): Promise<string> {
-    const res = await fetchApi(url);
+    let res = await fetchApi(url);
+    for (
+      let retry = 0;
+      res.status === 429 && retry < this.maxRateLimitRetries;
+      retry++
+    ) {
+      const waitMs = this.retryAfterMs(res);
+      if (waitMs === null) break;
+      await new Promise(resolve => setTimeout(resolve, waitMs));
+      res = await fetchApi(url);
+    }
     if (!res.ok) {
       let message = 'Request failed: ' + res.status;
-      if (res.headers.get('cf-mitigated') === 'challenge') {
+      if (res.status === 429) {
+        message =
+          'daotekno.com is rate-limiting requests (HTTP 429). ' +
+          'Wait a few seconds, then retry.';
+      } else if (res.headers.get('cf-mitigated') === 'challenge') {
         message =
           'Cloudflare challenge (HTTP ' +
           res.status +
