@@ -479,8 +479,8 @@ class WTRLAB implements Plugin.PluginBase {
     if (!novel.name) {
       novel.name = resolveTokens(
         loadedCheerio('h1.text-uppercase').text() ||
-          loadedCheerio('h1.long-title').text() ||
-          loadedCheerio('.title-wrap h1').text().trim(),
+        loadedCheerio('h1.long-title').text() ||
+        loadedCheerio('.title-wrap h1').text().trim(),
       );
     }
 
@@ -493,8 +493,8 @@ class WTRLAB implements Plugin.PluginBase {
     if (!novel.summary) {
       novel.summary = resolveTokens(
         loadedCheerio('.description').text().trim() ||
-          loadedCheerio('.desc-wrap .description').text().trim() ||
-          loadedCheerio('.lead').text().trim(),
+        loadedCheerio('.desc-wrap .description').text().trim() ||
+        loadedCheerio('.lead').text().trim(),
       );
     }
 
@@ -526,7 +526,8 @@ class WTRLAB implements Plugin.PluginBase {
 
         if (Array.isArray(pageProps?.tags)) {
           for (const tag of pageProps.tags) {
-            const title = tag?.title && resolveTokens(String(tag.title).trim());
+            const title =
+              tag?.title && resolveTokens(String(tag.title).trim());
             if (title) labels.push(title);
           }
         }

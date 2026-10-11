@@ -1,6 +1,6 @@
-import { fetchText } from '@libs/fetch';
-import { Plugin } from '@/types/plugin';
-import { NovelStatus } from '@libs/novelStatus';
+import { fetchText } from "@libs/fetch";
+import { Plugin } from "@/types/plugin";
+import { NovelStatus } from "@libs/novelStatus";
 
 type NovelCard = {
   slug: string;
@@ -66,9 +66,9 @@ function unescapeFlight(s: string): string {
  */
 function extractFlightText(html: string): string {
   if (html.length > MAX_PAGE_CHARS)
-    throw new Error('Page too large to parse safely');
+    throw new Error("Page too large to parse safely");
   const re = /self\.__next_f\.push\(\[1,"([\s\S]*?)"\]\)\s*;?\s*<\/script>/g;
-  let out = '';
+  let out = "";
   let m: RegExpExecArray | null;
   while ((m = re.exec(html)) !== null) {
     try {
@@ -100,7 +100,7 @@ function entryPattern(slugPattern: string): string {
   );
 }
 
-const ENTRY_RE = new RegExp(entryPattern('([a-z0-9-]+)'), 'g');
+const ENTRY_RE = new RegExp(entryPattern("([a-z0-9-]+)"), "g");
 
 /** Parse every novel card object embedded in flight data (browse/search pages). */
 function parseNovelEntries(flight: string): NovelCard[] {
@@ -133,7 +133,7 @@ function parseNovelEntries(flight: string): NovelCard[] {
 /** Find the novel's own card in the page's embedded novel index (header data). */
 function findIndexEntry(flight: string, slug: string): NovelCard | null {
   const re = new RegExp(
-    entryPattern(slug.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
+    entryPattern(slug.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
   );
   const m = re.exec(flight);
   if (!m) return null;
@@ -155,12 +155,12 @@ function findIndexEntry(flight: string, slug: string): NovelCard | null {
 }
 
 const HTML_ENTITY_CHARS: Record<string, string> = {
-  amp: '&',
+  amp: "&",
   quot: '"',
-  '#39': "'",
+  "#39": "'",
   apos: "'",
-  lt: '<',
-  gt: '>',
+  lt: "<",
+  gt: ">",
 };
 
 function decodeHtmlEntities(s: string): string {
@@ -192,7 +192,7 @@ const CHAPTER_RE = new RegExp(
   '"number":(\\d+(?:\\.\\d+)?),"title":"' +
     JSON_STR +
     '","publishedAt":"([^"]*)","words":(\\d+),"tier":"([^"]*)"',
-  'g',
+  "g",
 );
 
 /** Parse a /novel/<slug> page into its details + full chapter list. */
@@ -203,11 +203,11 @@ function parseNovelPage(
 ): NovelDetails {
   const details: NovelDetails = {
     name: slug,
-    author: '',
+    author: "",
     genres: [],
-    status: '',
-    cover: '',
-    summary: '',
+    status: "",
+    cover: "",
+    summary: "",
     chapters: [],
   };
 
@@ -227,7 +227,7 @@ function parseNovelPage(
   if (indexEntry && indexEntry.genres.length > 0) {
     details.genres = indexEntry.genres;
   } else {
-    const chipRow = flight.indexOf('mt-3 flex flex-wrap gap-1.5');
+    const chipRow = flight.indexOf("mt-3 flex flex-wrap gap-1.5");
     if (chipRow >= 0) {
       const chipRe = /"children":\["#","([^"]*)"\]/g;
       chipRe.lastIndex = chipRow;
@@ -269,7 +269,7 @@ function parseNovelPage(
 
   // Synopsis from the meta description tag.
   m = /<meta name="description" content="([\s\S]*?)"/.exec(html);
-  if (m) details.summary = decodeHtmlEntities(m[1]).replace(/\\n/g, '\n');
+  if (m) details.summary = decodeHtmlEntities(m[1]).replace(/\\n/g, "\n");
 
   // Chapter list: flat {number,title,publishedAt,words,tier} objects.
   const seenCh = new Set<number>();
@@ -292,11 +292,11 @@ function parseNovelPage(
 }
 
 const LOCKED_MESSAGE =
-  '<p><strong>This chapter is locked on Nightjar Reads.</strong></p>' +
-  '<p>It is a premium chapter — unlock it on nightjarreads.com to read it here.</p>';
+  "<p><strong>This chapter is locked on Nightjar Reads.</strong></p>" +
+  "<p>It is a premium chapter — unlock it on nightjarreads.com to read it here.</p>";
 
 function escapeHtml(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
 /** The chapter body: a JSON string array followed by translatorNotes. */
@@ -344,11 +344,13 @@ function parseChapterPage(flight: string): string | null {
   // (p.trim is not a function) and crash the chapter load, instead of
   // returning null as this function documents. Non-strings are dropped.
   const paras = parsedBody
-    .filter((p): p is string => typeof p === 'string')
-    .map(p => p.trim())
-    .filter(p => p.length > 0 && !/Advance chapters at Nightjar Reads/.test(p));
+    .filter((p): p is string => typeof p === "string")
+    .map((p) => p.trim())
+    .filter(
+      (p) => p.length > 0 && !/Advance chapters at Nightjar Reads/.test(p),
+    );
   if (paras.length === 0) return null;
-  return paras.map(p => '<p>' + escapeHtml(p) + '</p>').join('\n');
+  return paras.map((p) => "<p>" + escapeHtml(p) + "</p>").join("\n");
 }
 
 /**
@@ -372,7 +374,7 @@ const SEARCH_SECTION_MAX_CHARS = 200000;
  */
 function parseSearchResults(flight: string, query: string): NovelCard[] {
   const marker =
-    '"initial":"' + query.replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"';
+    '"initial":"' + query.replace(/\\/g, "\\\\").replace(/"/g, '\\"') + '"';
   const start = flight.indexOf(marker);
   let section = flight;
   if (start >= 0) {
@@ -400,38 +402,40 @@ function parseSearchResults(flight: string, query: string): NovelCard[] {
       order.push(hm[1]);
     }
   }
-  const index = new Map(parseNovelEntries(flight).map(n => [n.slug, n]));
-  return order.map(slug => index.get(slug)).filter((n): n is NovelCard => !!n);
+  const index = new Map(parseNovelEntries(flight).map((n) => [n.slug, n]));
+  return order
+    .map((slug) => index.get(slug))
+    .filter((n): n is NovelCard => !!n);
 }
 
 class NightjarReads implements Plugin.PluginBase {
-  id = 'nightjarreads';
-  name = 'Nightjar Reads';
-  icon = 'src/en/nightjarreads/icon.png';
-  site = 'https://nightjarreads.com';
-  version = '1.0.0';
+  id = "nightjarreads";
+  name = "Nightjar Reads";
+  icon = "src/en/nightjarreads/icon.png";
+  site = "https://nightjarreads.com";
+  version = "1.0.0";
 
   async popularNovels(pageNo: number): Promise<Plugin.NovelItem[]> {
     if (pageNo > 1) return [];
-    const html = await fetchText(this.site + '/browse?sort=popular');
-    return parseNovelEntries(extractFlightText(html)).map(n => ({
+    const html = await fetchText(this.site + "/browse?sort=popular");
+    return parseNovelEntries(extractFlightText(html)).map((n) => ({
       name: n.title,
-      path: '/novel/' + n.slug,
+      path: "/novel/" + n.slug,
       cover: n.coverUrl,
     }));
   }
 
   async parseNovel(novelPath: string): Promise<Plugin.SourceNovel> {
-    const slug = novelPath.split('/').filter(Boolean).pop() || '';
+    const slug = novelPath.split("/").filter(Boolean).pop() || "";
     const html = await fetchText(this.site + novelPath);
     const d = parseNovelPage(html, extractFlightText(html), slug);
 
     let status: string = NovelStatus.Unknown;
-    if (d.status === 'Ongoing') status = NovelStatus.Ongoing;
-    else if (d.status === 'Completed') status = NovelStatus.Completed;
-    else if (d.status === 'On Hiatus' || d.status === 'Hiatus')
+    if (d.status === "Ongoing") status = NovelStatus.Ongoing;
+    else if (d.status === "Completed") status = NovelStatus.Completed;
+    else if (d.status === "On Hiatus" || d.status === "Hiatus")
       status = NovelStatus.OnHiatus;
-    else if (d.status === 'Cancelled' || d.status === 'Dropped')
+    else if (d.status === "Cancelled" || d.status === "Dropped")
       status = NovelStatus.Cancelled;
 
     const novel: Plugin.SourceNovel = {
@@ -441,11 +445,11 @@ class NightjarReads implements Plugin.PluginBase {
     };
     if (d.cover) novel.cover = d.cover;
     if (d.author) novel.author = d.author;
-    if (d.genres.length) novel.genres = d.genres.join(', ');
+    if (d.genres.length) novel.genres = d.genres.join(", ");
     if (d.summary) novel.summary = d.summary;
-    novel.chapters = d.chapters.map(c => ({
-      name: 'Chapter ' + c.number + ': ' + c.title,
-      path: '/novel/' + slug + '/' + c.number,
+    novel.chapters = d.chapters.map((c) => ({
+      name: "Chapter " + c.number + ": " + c.title,
+      path: "/novel/" + slug + "/" + c.number,
       releaseTime: c.publishedAt,
       chapterNumber: c.number,
     }));
@@ -457,8 +461,8 @@ class NightjarReads implements Plugin.PluginBase {
     const content = parseChapterPage(extractFlightText(html));
     if (content === null) {
       return (
-        '<p><strong>Could not load this chapter.</strong></p>' +
-        '<p>It may be locked or temporarily unavailable on Nightjar Reads.</p>'
+        "<p><strong>Could not load this chapter.</strong></p>" +
+        "<p>It may be locked or temporarily unavailable on Nightjar Reads.</p>"
       );
     }
     return content;
@@ -470,12 +474,12 @@ class NightjarReads implements Plugin.PluginBase {
   ): Promise<Plugin.NovelItem[]> {
     if (pageNo > 1) return [];
     const html = await fetchText(
-      this.site + '/search?q=' + encodeURIComponent(searchTerm),
+      this.site + "/search?q=" + encodeURIComponent(searchTerm),
     );
     const flight = extractFlightText(html);
-    return parseSearchResults(flight, searchTerm).map(n => ({
+    return parseSearchResults(flight, searchTerm).map((n) => ({
       name: n.title,
-      path: '/novel/' + n.slug,
+      path: "/novel/" + n.slug,
       cover: n.coverUrl,
     }));
   }
