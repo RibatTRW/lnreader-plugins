@@ -78,19 +78,26 @@ class Toasteful implements Plugin.PluginBase {
   }
 
   private entryToNovel(entry: FeedEntry): Plugin.NovelItem | undefined {
-    const href = entry.link?.find(link => link.rel === 'alternate')?.href;
-    if (!href) return undefined;
-    let cover: string | undefined;
-    const html = entry.content?.$t;
-    if (html) {
-      const src = loadCheerio(html)('img').first().attr('src');
-      if (src && !src.includes(PLACEHOLDER_COVER)) cover = src;
+    try {
+      const href = entry.link?.find(link => link.rel === 'alternate')?.href;
+      if (!href) return undefined;
+      const name = entry.title?.$t?.replace(/^\(NEW!!!\)\s*/, '').trim();
+      if (!name) return undefined;
+      const resolved = this.resolveUrl(href);
+      let cover: string | undefined;
+      const html = entry.content?.$t;
+      if (html) {
+        const src = loadCheerio(html)('img').first().attr('src');
+        if (src && !src.includes(PLACEHOLDER_COVER)) cover = src;
+      }
+      return {
+        name,
+        path: new URL(resolved).pathname,
+        cover: cover || defaultCover,
+      };
+    } catch {
+      return undefined;
     }
-    return {
-      name: entry.title.$t.replace(/^\(NEW!!!\)\s*/, '').trim(),
-      path: new URL(this.resolveUrl(href)).pathname,
-      cover: cover || defaultCover,
-    };
   }
 
   async popularNovels(
@@ -170,7 +177,8 @@ class Toasteful implements Plugin.PluginBase {
       ? authorText
           .trim()
           .replace(/^author:\s*/i, '')
-          .trim() || undefined
+          .split(/\n|genre:|raw\s*source:|raw:|status:|synopsis:/i)[0]
+          ?.trim() || undefined
       : undefined;
 
     const body = $('.post-body').first();
@@ -259,6 +267,12 @@ class Toasteful implements Plugin.PluginBase {
     if (path === new URL(pageUrl).pathname) return false;
     // Side-story hubs are linked as bare "here" pointers, not chapters.
     if (linkText.trim().toLowerCase() === 'here') return false;
+    if (
+      !/(chapter|episode|part|prologue|epilogue|interlude|afterstory|volume|side story|\d)/i.test(
+        linkText,
+      )
+    )
+      return false;
     return true;
   }
 
@@ -270,13 +284,17 @@ class Toasteful implements Plugin.PluginBase {
       : $('.post-body').first();
     content.find('script,style,iframe,form,noscript,.ChapterNav').remove();
     content
-      .find('.reader-toolbar,.js-notice,.adsbygoogle,[class*="ad-"]')
+      .find(
+        '.reader-toolbar,.js-notice,.adsbygoogle,.ad,.ads,[class^="ad-"],[class*=" ad-"]',
+      )
       .remove();
     content.find('a[href*="docs.google.com/forms"]').remove();
     const junk =
       /hello,?\s+we have a (new|other)|we also have a similar genre|please bookmark this series|report error/i;
     content.find('div,p').each((_, el) => {
-      if (junk.test($(el).text().trim())) $(el).remove();
+      const node = $(el);
+      if (node.is('div') && node.find('p,div').length) return;
+      if (junk.test(node.text().trim())) node.remove();
     });
     const chapter = content.html() || '';
     if (loadCheerio(chapter).text().trim().length < 200)
