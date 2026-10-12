@@ -268,7 +268,7 @@ class Toasteful implements Plugin.PluginBase {
     // Side-story hubs are linked as bare "here" pointers, not chapters.
     if (linkText.trim().toLowerCase() === 'here') return false;
     if (
-      !/(chapter|episode|part|prologue|epilogue|interlude|afterstory|volume|side story)/i.test(
+      !/\b(chapter|episode|part|prologue|epilogue|interlude|afterstory|volume)\b|\bside\s*story\b/i.test(
         linkText,
       )
     )
