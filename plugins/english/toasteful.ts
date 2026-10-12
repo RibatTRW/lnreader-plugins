@@ -31,7 +31,7 @@ class Toasteful implements Plugin.PluginBase {
   name = 'Toasteful';
   site = 'https://www.toasteful.com';
   icon = 'src/en/toasteful/icon.png';
-  version = '1.0.0';
+  version = '1.0.1';
 
   filters: Filters = {
     genres: {
@@ -306,34 +306,39 @@ class Toasteful implements Plugin.PluginBase {
     searchTerm: string,
     pageNo: number,
   ): Promise<Plugin.NovelItem[]> {
-    const wanted = pageNo * PAGE_SIZE;
+    const tokens = searchTerm
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter(Boolean);
+    if (!tokens.length) return [];
+    // Blogger ignores the /-/label path once q is present, so a q search
+    // returns chapter posts that crowd novels out of the window. Search the
+    // labeled novel list instead: one feed holds the whole catalogue, so
+    // matching novels can never be crowded out and paging is exact.
     const novels: Plugin.NovelItem[] = [];
     let start = 1;
-    for (let round = 0; round < 4 && novels.length < wanted; round++) {
-      const params = new URLSearchParams({
-        'alt': 'json',
-        'q': searchTerm,
-        'max-results': '150',
-        'start-index': String(start),
-      }).toString();
+    for (let round = 0; round < 4; round++) {
       const data: FeedResponse = await (
-        await this.request(`${this.site}/feeds/posts/default?${params}`)
+        await this.request(
+          this.feedUrl([NOVEL_LABEL], {
+            'max-results': '150',
+            'start-index': String(start),
+          }),
+        )
       ).json();
       const entries = data.feed?.entry || [];
       if (!entries.length) break;
       for (const entry of entries) {
-        const isNovel = (entry.category || []).some(
-          category => category.term === NOVEL_LABEL,
-        );
-        if (!isNovel) continue;
         const novel = this.entryToNovel(entry);
-        if (novel && !novels.some(item => item.path === novel.path))
-          novels.push(novel);
-        if (novels.length >= wanted) break;
+        if (!novel || novels.some(item => item.path === novel.path)) continue;
+        const name = novel.name.toLowerCase();
+        if (tokens.every(token => name.includes(token))) novels.push(novel);
       }
+      const total = Number(data.feed?.openSearch$totalResults?.$t || 0);
       start += entries.length;
+      if (!total || start > total) break;
     }
-    return novels.slice((pageNo - 1) * PAGE_SIZE, wanted);
+    return novels.slice((pageNo - 1) * PAGE_SIZE, pageNo * PAGE_SIZE);
   }
 
   resolveUrl(path: string): string {
