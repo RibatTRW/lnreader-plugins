@@ -9,15 +9,13 @@ const fwnRegex =
 
 // Reproduced against api.novelbuddy.me/titles/search: a query over 50 characters
 // (e.g. "Reincarnation Of The Strongest Sword God (Web Novel)") answers HTTP 400
-// with no `data`, while a shorter query answers 200 with `data.items`. Trim to a
-// word boundary and never leave a lone surrogate half at the cut.
+// with no `data`, while a shorter query answers 200 with `data.items`. Never
+// leave a lone surrogate half at the cut.
 const MAX_QUERY_LENGTH = 50;
 function clampQuery(query: string): string {
   if (query.length <= MAX_QUERY_LENGTH) return query;
-  let cut = query.slice(0, MAX_QUERY_LENGTH);
-  if (/[\uD800-\uDBFF]$/.test(cut)) cut = cut.slice(0, -1);
-  const lastSpace = cut.lastIndexOf(' ');
-  return (lastSpace > 0 ? cut.slice(0, lastSpace) : cut).trim();
+  const cut = query.slice(0, MAX_QUERY_LENGTH);
+  return /[\uD800-\uDBFF]$/.test(cut) ? cut.slice(0, -1) : cut;
 }
 
 class NovelBuddy implements Plugin.PluginBase {
@@ -75,7 +73,7 @@ class NovelBuddy implements Plugin.PluginBase {
     const result = await fetchApi(
       this.api + 'titles/search?' + params.toString(),
     );
-    const body = await result.json();
+    const body = result.ok ? await result.json() : undefined;
     if (!body?.data?.items) {
       throw new Error(`NovelBuddy search failed with HTTP ${result.status}`);
     }
