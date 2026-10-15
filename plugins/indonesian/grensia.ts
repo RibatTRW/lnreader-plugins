@@ -200,9 +200,7 @@ class GrensiaPlugin implements Plugin.PluginBase {
     // The List Novel posts share the series name but are index pages, not chapters.
     const indexUrls = landings.map(item => item.url);
     const matching = posts.filter(
-      post =>
-        indexUrls.indexOf(post.url) < 0 &&
-        belongsTo(post, key),
+      post => indexUrls.indexOf(post.url) < 0 && belongsTo(post, key),
     );
     // Oldest first; posts published in the same minute keep chapter order.
     matching.sort(
