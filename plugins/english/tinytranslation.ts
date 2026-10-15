@@ -86,8 +86,8 @@ class TinyTranslation implements Plugin.PluginBase {
     const labels = loadCheerio(
       detailsHtml.replace(/<br\s*\/?>/gi, '\n'),
     ).text();
-    const author = /^\s*Author\s*:\s*(.+)$/im.exec(labels)?.[1]?.trim();
-    const genres = /^\s*Genre\s*:\s*(.+)$/im
+    const author = /^\s*Author\s*:[ \t]*(.+)$/im.exec(labels)?.[1]?.trim();
+    const genres = /^\s*Genre\s*:[ \t]*(.+)$/im
       .exec(labels)?.[1]
       ?.trim()
       .replace(/[\s,]+$/, '');
