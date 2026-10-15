@@ -23,13 +23,6 @@ const toPath = (href?: string): string | undefined => {
   }
 };
 
-// returns the text after a full- or half-width colon, e.g. "作者：水果饺子"
-const valueAfterColon = (text: string): string =>
-  text
-    .replace(/\u00a0/g, ' ')
-    .replace(/^[^：:]*[：:]\s*/, '')
-    .trim();
-
 class LeWennPlugin implements Plugin.PluginBase {
   id = 'lewenn';
   name = '乐文小说网';
@@ -115,29 +108,18 @@ class LeWennPlugin implements Plugin.PluginBase {
     const getMeta = (prop: string) =>
       $(`meta[property="${prop}"]`).attr('content')?.trim() || '';
 
-    const $info = $('#info');
-    const infoLine = (label: string) =>
-      $info
-        .find('p')
-        .filter((_i, p) => $(p).text().includes(label))
-        .first()
-        .text();
-
-    const statusText = getMeta('og:novel:status') || infoLine('状态');
+    const statusText = getMeta('og:novel:status');
 
     return {
       path: novelPath,
-      name: getMeta('og:novel:book_name') || $info.find('h1').text().trim(),
+      name: getMeta('og:novel:book_name'),
       cover: getMeta('og:image') || defaultCover,
       summary:
         $('#intro')
           .text()
           .replace(/\u00a0/g, ' ')
           .trim() || undefined,
-      author:
-        getMeta('og:novel:author') ||
-        valueAfterColon(infoLine('作者')) ||
-        undefined,
+      author: getMeta('og:novel:author') || undefined,
       genres: getMeta('og:novel:category') || undefined,
       status: statusText.includes('完结')
         ? NovelStatus.Completed
@@ -201,7 +183,10 @@ class LeWennPlugin implements Plugin.PluginBase {
           .trim(),
       )
       .filter(line => line && !AD_LINE.test(line))
-      .map(line => `<p>${line}</p>`);
+      .map(
+        line =>
+          `<p>${line.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</p>`,
+      );
 
     if (!paragraphs.length)
       throw new Error(`[LeWenn] Chapter content not found: ${url}`);
