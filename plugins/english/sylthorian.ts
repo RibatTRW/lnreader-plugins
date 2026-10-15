@@ -114,15 +114,11 @@ class Sylthorian implements Plugin.PluginBase {
       const node = $(el);
       const path = node.attr('href');
       const name = node.text().replace(/\s+/g, ' ').trim();
-      if (!path || !name || seen.has(path)) return;
+      const number = path?.slice(prefix.length).match(/^(\d+)$/);
+      if (!path || !name || !number || seen.has(path)) return;
       seen.add(path);
 
-      const chapter: Plugin.ChapterItem = { name, path };
-      const number = path.slice(prefix.length).match(/^(\d+)$/);
-      if (number) {
-        chapter.chapterNumber = parseInt(number[1], 10);
-      }
-      chapters.push(chapter);
+      chapters.push({ name, path, chapterNumber: parseInt(number[1], 10) });
     });
 
     return chapters;
