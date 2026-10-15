@@ -118,7 +118,7 @@ class TinyTranslation implements Plugin.PluginBase {
     const chapters: Plugin.ChapterItem[] = [];
     const seen = new Set<string>();
     const chapterHeading = $('h5')
-      .filter((_, el) => /^chapter:$/i.test($(el).text().trim()))
+      .filter((_, el) => /^chapter\b.*:$/i.test($(el).text().trim()))
       .first()
       .get(0);
     if (chapterHeading) {
