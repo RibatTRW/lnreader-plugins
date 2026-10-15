@@ -20,7 +20,11 @@ class TsundokuPlugin implements Plugin.PluginBase {
 
     // A missing or unrecognised date must not throw; the chapter just has no release time.
     const parsed = dayjs(`${year}-${Number(month)}-${day}`);
-    return parsed.isValid() ? parsed.toISOString() : null;
+    const isCalendarDate =
+      parsed.isValid() &&
+      parsed.date() === Number(day) &&
+      parsed.month() === Number(month) - 1;
+    return isCalendarDate ? parsed.toISOString() : null;
   }
 
   parseNovels(loadedCheerio: CheerioAPI) {
