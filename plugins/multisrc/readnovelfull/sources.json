@@ -20,21 +20,6 @@
     }
   },
   {
-    "id": "lightnovelplus",
-    "sourceSite": "https://lightnovelplus.com/",
-    "sourceName": "LightNovelPlus",
-    "options": {
-      "novelListing": "book/bookclass.html",
-      "searchPage": "book/search.html",
-      "chapterListing": "get_chapter_list",
-      "chapterParam": "bookId",
-      "latestPage": "last_release",
-      "pageParam": "page_num",
-      "langParam": "language",
-      "urlLangCode": "en"
-    }
-  },
-  {
     "id": "novelfull",
     "sourceSite": "https://novelfull.com/",
     "sourceName": "NovelFull",
