@@ -144,7 +144,7 @@ class Novels2 implements Plugin.PluginBase {
       match = chapterRe.exec(html);
     }
 
-    if (chapters.length === 0 && html.includes('\\"createdAt\\"')) {
+    if (chapters.length === 0 && /\\"number\\":\d/.test(html)) {
       throw new Error(`Could not parse chapter list for ${novelPath}`);
     }
 
