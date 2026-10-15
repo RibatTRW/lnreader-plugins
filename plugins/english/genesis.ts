@@ -144,14 +144,14 @@ class Genesis implements Plugin.PluginBase {
     }
     const id = chapterPath.replace('/viewer/', '');
 
-    // The chapter body is served by the site's own reader endpoint
-    const json: ChapterContentJSON = await fetchApi(
-      `${this.site}/api/chapters/${id}/content`,
-    ).then(r => r.json());
+    // Anonymous requests for paid chapters get HTTP 401, error "Authentication required",
+    // and chapter_content "None" (checked 2026-10-15), so a refusal is treated as locked
+    const res = await fetchApi(`${this.site}/api/chapters/${id}/content`);
+    const json: ChapterContentJSON = await res.json();
 
     const content = json.data?.chapter_content;
-    if (!content) {
-      throw new Error('Chapter content is unavailable');
+    if (!res.ok || json.error || !content || content === 'None') {
+      throw new Error('This chapter is locked on the site');
     }
     return content.replaceAll('\n', '<br/>');
   }
@@ -259,6 +259,7 @@ type ChapterJSON = {
 };
 
 type ChapterContentJSON = {
+  error?: string;
   data?: {
     chapter_content?: string | null;
   };
