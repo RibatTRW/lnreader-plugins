@@ -13,44 +13,13 @@ class TsundokuPlugin implements Plugin.PluginBase {
   site = 'https://tsundoku.com.br';
 
   parseDate(date: string): string | null {
-    const monthMapping: Record<string, number> = {
-      janeiro: 1,
-      fevereiro: 2,
-      marco: 3,
-      abril: 4,
-      maio: 5,
-      junho: 6,
-      julho: 7,
-      agosto: 8,
-      setembro: 9,
-      outubro: 10,
-      novembro: 11,
-      dezembro: 12,
-    };
-    const text = date.trim();
+    const match = date.trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (!match) return null;
 
-    // Current layout is DD/MM/YYYY (e.g. "17/07/2024"); the older
-    // "janeiro 5, 2024" month-name layout is still accepted.
-    const numeric = text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-    let day: string;
-    let month: number | string | undefined;
-    let year: string;
-    if (numeric) {
-      day = numeric[1];
-      month = Number(numeric[2]);
-      year = numeric[3];
-    } else {
-      const [monthName = '', dayText = '', yearText = ''] = text.split(/,?\s+/);
-      day = dayText;
-      year = yearText;
-      month =
-        monthMapping[
-          monthName.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-        ];
-    }
+    const [, day, month, year] = match;
 
     // A missing or unrecognised date must not throw; the chapter just has no release time.
-    const parsed = dayjs(`${year}-${month}-${day}`);
+    const parsed = dayjs(`${year}-${Number(month)}-${day}`);
     return parsed.isValid() ? parsed.toISOString() : null;
   }
 
