@@ -23,13 +23,6 @@ const toPath = (href?: string): string | undefined => {
   }
 };
 
-// the site stores cover images at files/article/image/<id/1000>/<id>/<id>s.jpg
-const coverOf = (novelPath: string): string => {
-  const id = novelPath.match(/^lw(\d+)\//)?.[1];
-  if (!id) return defaultCover;
-  return `${SITE}files/article/image/${Math.floor(Number(id) / 1000)}/${id}/${id}s.jpg`;
-};
-
 // returns the text after a full- or half-width colon, e.g. "作者：水果饺子"
 const valueAfterColon = (text: string): string =>
   text
@@ -83,7 +76,7 @@ class LeWennPlugin implements Plugin.PluginBase {
       const path = toPath($a.attr('href'));
       if (!name || !path || !NOVEL_PATH.test(path) || seen.has(path)) return;
       seen.add(path);
-      novels.push({ name, path, cover: coverOf(path) });
+      novels.push({ name, path, cover: defaultCover });
     });
 
     return novels;
@@ -135,7 +128,7 @@ class LeWennPlugin implements Plugin.PluginBase {
     return {
       path: novelPath,
       name: getMeta('og:novel:book_name') || $info.find('h1').text().trim(),
-      cover: getMeta('og:image') || coverOf(novelPath),
+      cover: getMeta('og:image') || defaultCover,
       summary:
         $('#intro')
           .text()
@@ -161,7 +154,6 @@ class LeWennPlugin implements Plugin.PluginBase {
     $: ReturnType<typeof parseHTML>,
   ): Plugin.ChapterItem[] {
     const mainText = new Map<string, Plugin.ChapterItem>();
-    const everyLink = new Map<string, Plugin.ChapterItem>();
     let inMainText = false;
 
     $('.listmain dl')
@@ -172,20 +164,17 @@ class LeWennPlugin implements Plugin.PluginBase {
           inMainText = $el.text().includes('正文');
           return;
         }
-        if (!$el.is('dd')) return;
+        if (!$el.is('dd') || !inMainText) return;
 
         const path = toPath($el.find('a').attr('href'));
         const name = $el.find('a').text().trim();
         if (!path || !name || !CHAPTER_PATH.test(path)) return;
 
-        const chapter = { name, path };
-        everyLink.set(path, chapter);
-        if (inMainText) mainText.set(path, chapter);
+        mainText.set(path, { name, path });
       });
 
-    // fall back to every link when the page has no 正文卷 heading
     const list: Plugin.ChapterItem[] = [];
-    (mainText.size ? mainText : everyLink).forEach(chapter =>
+    mainText.forEach(chapter =>
       list.push({ ...chapter, chapterNumber: list.length + 1 }),
     );
     return list;
