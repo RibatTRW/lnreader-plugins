@@ -17,6 +17,10 @@ import { defaultCover } from '@libs/defaultCover';
  *   rather than listed as empty chapters.
  */
 
+// Upper bound on text pages walked per book. Every page is one sequential
+// request made before the novel detail returns, so the cap keeps a single
+// book from issuing an unbounded number of requests. Books longer than this
+// are truncated, and parsePages logs a warning when it hits the cap.
 const MAX_PAGES = 300;
 
 class OnlineReadFreeNovelPlugin implements Plugin.PluginBase {
@@ -166,12 +170,15 @@ class OnlineReadFreeNovelPlugin implements Plugin.PluginBase {
           path: pagePath,
           chapterNumber: chapters.length + 1,
         });
-        if ($('.page_next a').length === 0) break;
+        if ($('.page_next a').length === 0) return chapters;
       } else if (++emptyRun >= 2) {
-        break;
+        return chapters;
       }
     }
 
+    console.warn(
+      `onlinereadfreenovel: stopped at MAX_PAGES (${MAX_PAGES}) for ${novelPath}; remaining pages were not listed`,
+    );
     return chapters;
   }
 
