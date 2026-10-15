@@ -192,9 +192,13 @@ class OnlineReadFreeNovelPlugin implements Plugin.PluginBase {
   }
 
   async fetchDom(path: string): Promise<CheerioAPI> {
-    const $ = await this.fetchPageDom(path);
-    if (!$) throw new Error(`HTTP error for ${path}`);
-    return $;
+    const res = await fetchApi(this.site + path);
+    if (!res.ok) {
+      throw Object.assign(new Error(`HTTP error for ${path}`), {
+        status: res.status,
+      });
+    }
+    return loadCheerio(await res.text());
   }
 
   async fetchPageDom(path: string): Promise<CheerioAPI | null> {
