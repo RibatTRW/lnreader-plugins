@@ -11,6 +11,7 @@ const LIST_PAGES = 3;
 
 type Post = {
   title: string;
+  description?: string;
   url: string;
   published: string;
   cover?: string;
@@ -48,6 +49,21 @@ const landingName = (title: string) =>
     .replace(/\s+Bahasa.*$/i, '')
     .trim();
 
+// Some series headlines use a romanized alias ("Isekai wa Heiwa deshita Chapter 1"),
+// but the structured description repeats the catalog title ("Novel <name> Indonesia").
+const descriptionSeries = (description?: string) => {
+  const match = /^Novel\s+(.+?)\s+Indonesia\b/i.exec(description || '');
+  return match ? match[1].trim() : undefined;
+};
+
+// A post belongs to every series its headline or description names.
+const seriesNames = (post: Post) => {
+  const names = [seriesName(post.title)];
+  const fromDescription = descriptionSeries(post.description);
+  if (fromDescription) names.push(fromDescription);
+  return names;
+};
+
 // Some posts point at Blogger's generic "Shoebox" logo (base64 "U2hvZWJveA")
 // instead of artwork, so those are treated as having no cover.
 const usableCover = (url?: string) =>
@@ -78,6 +94,7 @@ async function readPage(url: string) {
       if (!data.headline || !link) return;
       posts.push({
         title: decodeEntities(String(data.headline)).trim(),
+        description: data.description && String(data.description),
         url: link,
         published: data.datePublished,
         cover: usableCover(data.image && data.image.url),
@@ -178,7 +195,7 @@ class GrensiaPlugin implements Plugin.PluginBase {
     const matching = posts.filter(
       post =>
         indexUrls.indexOf(post.url) < 0 &&
-        normalize(seriesName(post.title)) === key,
+        seriesNames(post).some(name => normalize(name) === key),
     );
     // Oldest first; posts published in the same minute keep chapter order.
     matching.sort(
@@ -230,17 +247,18 @@ class GrensiaPlugin implements Plugin.PluginBase {
     const indexUrls = landings.map(item => item.url);
     posts.forEach(post => {
       if (indexUrls.indexOf(post.url) >= 0) return;
-      const name = seriesName(post.title);
-      const key = normalize(name);
-      if (!key || seen[key] || key.indexOf(term) < 0) return;
-      seen[key] = true;
+      seriesNames(post).forEach(name => {
+        const key = normalize(name);
+        if (!key || seen[key] || key.indexOf(term) < 0) return;
+        seen[key] = true;
 
-      // Prefer the series' own index cover, then the first chapter's image.
-      const landing = landings.find(item => normalize(item.name) === key);
-      novels.push({
-        name,
-        path: encodeURIComponent(name),
-        cover: (landing && landing.cover) || post.cover || defaultCover,
+        // Prefer the series' own index cover, then the first chapter's image.
+        const landing = landings.find(item => normalize(item.name) === key);
+        novels.push({
+          name,
+          path: encodeURIComponent(name),
+          cover: (landing && landing.cover) || post.cover || defaultCover,
+        });
       });
     });
 
