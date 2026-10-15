@@ -34,6 +34,10 @@ const MAX_PAGES = 400;
 // took about 90 seconds for a 240-page book.
 const PAGE_BATCH = 6;
 
+// Retries of a chapter-list page after a rate limit, server error or network
+// error, waiting 1s, 2s, 4s between them.
+const PAGE_RETRIES = 3;
+
 // Empty pages in a row after a page that links to a next one before the walk
 // gives up. It only ends the walk when the book's real last page is empty.
 const MAX_EMPTY_RUN = 12;
@@ -198,7 +202,8 @@ class OnlineReadFreeNovelPlugin implements Plugin.PluginBase {
    * is `p,<n>,` inserted before the id. Pages are fetched PAGE_BATCH at a time
    * and handled in order. The walk ends at the first page with text and no
    * next link, or after MAX_EMPTY_RUN empty pages in a row. A page answered
-   * with no text or a non-OK status counts as empty and is skipped.
+   * with no text or a 404 counts as empty and is skipped. Any other failure
+   * throws after retries, so a rate limit never shortens the list silently.
    */
   async parsePages(
     novelPath: string,
@@ -208,6 +213,7 @@ class OnlineReadFreeNovelPlugin implements Plugin.PluginBase {
     // A path not in the `_read.html` form cannot be paged; list page 1 only.
     const lastPage = this.pagePath(novelPath, 2) === novelPath ? 1 : MAX_PAGES;
     let emptyRun = 0;
+    let hasNext = false;
 
     for (let start = 1; start <= lastPage; start += PAGE_BATCH) {
       const pages: number[] = [];
@@ -218,14 +224,18 @@ class OnlineReadFreeNovelPlugin implements Plugin.PluginBase {
         pages.map(page =>
           page === 1
             ? firstPage
-            : this.fetchPageDom(this.pagePath(novelPath, page)),
+            : this.fetchPageDom(this.pagePath(novelPath, page)).catch(
+                (error: Error) => error,
+              ),
         ),
       );
 
       for (let i = 0; i < pages.length; i++) {
         const $ = doms[i];
+        if ($ instanceof Error) throw $;
         const paragraphs = $ ? this.paragraphs($) : [];
         if (!$ || paragraphs.length === 0) {
+          hasNext = false;
           if (++emptyRun >= MAX_EMPTY_RUN) return chapters;
           continue;
         }
@@ -241,11 +251,12 @@ class OnlineReadFreeNovelPlugin implements Plugin.PluginBase {
           path: this.pagePath(novelPath, pages[i]),
           chapterNumber: chapters.length + 1,
         });
-        if ($('.page_next a').length === 0) return chapters;
+        hasNext = $('.page_next a').length > 0;
+        if (!hasNext) return chapters;
       }
     }
 
-    if (lastPage === MAX_PAGES) {
+    if (lastPage === MAX_PAGES && hasNext) {
       console.warn(
         `onlinereadfreenovel: stopped at MAX_PAGES (${MAX_PAGES}) for ${novelPath}; remaining pages were not listed`,
       );
@@ -290,8 +301,21 @@ class OnlineReadFreeNovelPlugin implements Plugin.PluginBase {
   }
 
   async fetchPageDom(path: string): Promise<CheerioAPI | null> {
-    const res = await fetchApi(this.site + path, { headers: HEADERS });
-    return res.ok ? loadCheerio(await res.text()) : null;
+    for (let attempt = 0; ; attempt++) {
+      try {
+        const res = await fetchApi(this.site + path, { headers: HEADERS });
+        if (res.status === 404) return null;
+        if (!res.ok) {
+          throw Object.assign(new Error(`HTTP error for ${path}`), {
+            status: res.status,
+          });
+        }
+        return loadCheerio(await res.text());
+      } catch (error) {
+        if (attempt >= PAGE_RETRIES) throw error;
+        await new Promise(resolve => setTimeout(resolve, 1000 * 2 ** attempt));
+      }
+    }
   }
 
   toPath(href: string): string {
