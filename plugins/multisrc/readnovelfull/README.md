@@ -26,7 +26,7 @@ To add a new source you need to add it to sources.json:
   - chapterParam?: same with chapterListing, but its the key for the form body. default: novelId
   - pageParam?: if a site uses something other than "page" for accessing pages
 
-  // All the following is for when if a page uses a main path for querying novels and just adds params to it to get different outputs (see urls in lightnovelplus)
+  // All the following is for when if a page uses a main path for querying novels and just adds params to it to get different outputs (no current source uses these; see `template.ts` for how they are consumed)
 
   - novelListing?: Main path for browsing novels
   - typeParam?: Field for entering the type of novelListing (eg: latest, hot, completed, etc), default: type
