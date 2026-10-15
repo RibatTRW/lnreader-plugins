@@ -3,10 +3,18 @@ import { Plugin } from '@/types/plugin';
 import { Filters } from '@libs/filterInputs';
 import { load as loadCheerio } from 'cheerio';
 import { defaultCover } from '@libs/defaultCover';
+import { NovelStatus } from '@libs/novelStatus';
 
 const PLACEHOLDER_COVER = /404\.png|cover-404|noimagefound/i;
 // Chapters are `/<group>/<chapter>/`; the group is usually the series slug.
 const CHAPTER_PATH = /^\/(?!series\/)[^/]+\/[^/]+\/?$/;
+const LIST_STATUS: Record<string, string> = {
+  'on-going': NovelStatus.Ongoing,
+  completed: NovelStatus.Completed,
+  dropped: NovelStatus.Cancelled,
+};
+
+type ListedNovel = Plugin.NovelItem & { status?: string };
 
 class TinyTranslation implements Plugin.PluginBase {
   id = 'tinytranslation';
@@ -39,18 +47,27 @@ class TinyTranslation implements Plugin.PluginBase {
   }
 
   /** The site's full catalogue: one page, grouped by status, no pagination. */
-  private async catalogue(): Promise<Plugin.NovelItem[]> {
+  private async catalogue(): Promise<ListedNovel[]> {
     const $ = loadCheerio(
       await (await this.request(`${this.site}/list-novels/`)).text(),
     );
-    const novels: Plugin.NovelItem[] = [];
+    const novels: ListedNovel[] = [];
     const seen = new Set<string>();
-    $('ul.series-posts-list a[href]').each((_, el) => {
-      const path = this.seriesPath($(el).attr('href'));
-      const name = $(el).text().trim().replace(/\s+/g, ' ');
-      if (!path || !name || seen.has(path)) return;
-      seen.add(path);
-      novels.push({ name, path, cover: defaultCover });
+    let status: string | undefined;
+    $('h3, ul.series-posts-list').each((_, el) => {
+      if ($(el).is('h3')) {
+        status = LIST_STATUS[$(el).text().trim().toLowerCase()];
+        return;
+      }
+      $(el)
+        .find('a[href]')
+        .each((_, link) => {
+          const path = this.seriesPath($(link).attr('href'));
+          const name = $(link).text().trim().replace(/\s+/g, ' ');
+          if (!path || !name || seen.has(path)) return;
+          seen.add(path);
+          novels.push({ name, path, cover: defaultCover, status });
+        });
     });
     return novels;
   }
@@ -150,12 +167,18 @@ class TinyTranslation implements Plugin.PluginBase {
     if (!chapters.length)
       throw new Error('TinyTranslation: no chapters were found on this page.');
 
+    const seriesPath = this.seriesPath(novelPath);
+    const status = (await this.catalogue()).find(
+      novel => novel.path === seriesPath,
+    )?.status;
+
     return {
       path: novelPath,
       name,
       cover,
       author,
       genres,
+      status,
       summary: summary || undefined,
       chapters,
     };
