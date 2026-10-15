@@ -186,7 +186,9 @@ class Novels2 implements Plugin.PluginBase {
     return this.parseNovelCards(html);
   }
 
-  resolveUrl = (path: string): string => this.site + path;
+  /** Absolute URLs (such as cover images) are returned as they are. */
+  resolveUrl = (path: string): string =>
+    /^https?:\/\//.test(path) ? path : this.site + path;
 }
 
 export default new Novels2();
