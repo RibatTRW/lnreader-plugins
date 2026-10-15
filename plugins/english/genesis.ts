@@ -113,8 +113,10 @@ class Genesis implements Plugin.PluginBase {
     const raw = await fetchApi(url);
     const json: ChapterJSON = await raw.json();
 
-    // Format each chapter and add only valid ones
+    // Only released chapters are listed; the pre-2.0.1 Supabase query filtered on status=eq.released
+    // (every chapter observed had status released: 5 of 5 and 157 of 157 in the listing, 2026-10-15)
     const chapters = json.data.chapters
+      .filter(index => index.status === 'released')
       .map(index => {
         const title = index.chapter_title;
         const isLocked = !index.isUnlocked;
@@ -253,6 +255,7 @@ type ChapterJSON = {
       id: string;
       chapter_number: number;
       chapter_title: string;
+      status: string;
       isUnlocked: boolean;
     }[];
   };
