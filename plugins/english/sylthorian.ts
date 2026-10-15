@@ -137,13 +137,7 @@ class Sylthorian implements Plugin.PluginBase {
 
     const novel: Plugin.SourceNovel = {
       path: novelPath,
-      name:
-        $('h2').first().text().replace(/\s+/g, ' ').trim() ||
-        $('meta[itemprop="name"]')
-          .attr('content')
-          ?.replace(/\s*—\s*The Sylthorian\s*$/, '')
-          .trim() ||
-        'Untitled',
+      name: $('h2').first().text().replace(/\s+/g, ' ').trim() || 'Untitled',
       cover: this.toHttps($('meta[property="og:image"]').attr('content')),
       summary: this.parseSummary($),
       chapters: this.parseChapters($, novelPath),
@@ -156,8 +150,7 @@ class Sylthorian implements Plugin.PluginBase {
     const html = await this.fetchSiteText(this.site + chapterPath);
     const $ = parseHTML(html);
 
-    const content = $('.blog-item-content.e-content .sqs-html-content').first();
-    const node = content.length ? content : $('.blog-item-content').first();
+    const node = $('.blog-item-content.e-content .sqs-html-content').first();
     if (!node.length) {
       // A page without the post body is a real failure, not empty content.
       throw new Error('Chapter content not found');
