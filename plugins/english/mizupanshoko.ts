@@ -10,7 +10,6 @@ type NovelPage = {
   path: string;
   name: string;
   cover: string;
-  $: Page;
 };
 
 /** Dated permalink every chapter post uses, e.g. `/2022/01/26/<slug>/`. */
@@ -57,12 +56,13 @@ class MizupanPlugin implements Plugin.PluginBase {
 
   async parseNovel(novelPath: string): Promise<Plugin.SourceNovel> {
     const path = this.toPath(novelPath);
-    const page = await this.loadNovelPage(path);
-    const chapters = this.novelChapters(page.$);
+    const $ = await this.loadNovelPage(path);
+    const chapters = this.novelChapters($);
     if (chapters.length === 0) {
       throw new Error(`Mizupan's Archives: no chapters listed at ${path}`);
     }
 
+    const page = this.toNovelPage(path, $);
     const novel: Plugin.SourceNovel = {
       path,
       name: page.name,
@@ -70,7 +70,7 @@ class MizupanPlugin implements Plugin.PluginBase {
       chapters,
     };
 
-    const summary = this.novelSummary(page.$);
+    const summary = this.novelSummary($);
     if (summary) {
       novel.summary = summary;
     }
@@ -177,18 +177,21 @@ class MizupanPlugin implements Plugin.PluginBase {
 
     const pages: NovelPage[] = [];
     for (const path of paths) {
-      const page = await this.loadNovelPage(path);
-      if (this.novelChapters(page.$).length > 0) {
-        pages.push(page);
+      const $ = await this.loadNovelPage(path);
+      if (this.novelChapters($).length > 0) {
+        pages.push(this.toNovelPage(path, $));
       }
     }
     return pages;
   }
 
-  private async loadNovelPage(path: string): Promise<NovelPage> {
+  private async loadNovelPage(path: string): Promise<Page> {
     const $ = loadCheerio(await this.fetchHtml(this.site + path));
     $('.jp-relatedposts, .sharedaddy, script, style').remove();
+    return $;
+  }
 
+  private toNovelPage(path: string, $: Page): NovelPage {
     const name = this.normalizeText($('h1.entry-title').first().text());
     // Novels without artwork fall back to WordPress's blank placeholder image.
     const ogImage = $('meta[property="og:image"]').attr('content') || '';
@@ -196,7 +199,7 @@ class MizupanPlugin implements Plugin.PluginBase {
       ogImage && ogImage.indexOf('/i/blank.jpg') === -1
         ? ogImage
         : defaultCover;
-    return { path, name, cover, $ };
+    return { path, name, cover };
   }
 
   private novelChapters($: Page): Plugin.ChapterItem[] {
