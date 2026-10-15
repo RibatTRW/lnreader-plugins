@@ -7,8 +7,6 @@ import { defaultCover } from '@libs/defaultCover';
 const PLACEHOLDER_COVER = /404\.png|cover-404|noimagefound/i;
 // Chapters are `/<group>/<chapter>/`; the group is usually the series slug.
 const CHAPTER_PATH = /^\/[^/]+\/[^/]+\/?$/;
-// The site's chapter search is slow for some terms; it only adds to results.
-const CHAPTER_SEARCH_TIMEOUT_MS = 10000;
 
 class TinyTranslation implements Plugin.PluginBase {
   id = 'tinytranslation';
@@ -184,42 +182,6 @@ class TinyTranslation implements Plugin.PluginBase {
     return chapter;
   }
 
-  /** Novels whose chapter text matches the search, as `/series/<slug>/` paths. */
-  private async chapterSearchPaths(searchTerm: string): Promise<string[]> {
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const timeout = new Promise<string[]>(resolve => {
-      timer = setTimeout(() => resolve([]), CHAPTER_SEARCH_TIMEOUT_MS);
-    });
-    try {
-      return await Promise.race([
-        this.fetchChapterSearchPaths(searchTerm),
-        timeout,
-      ]);
-    } catch {
-      return [];
-    } finally {
-      clearTimeout(timer);
-    }
-  }
-
-  private async fetchChapterSearchPaths(searchTerm: string): Promise<string[]> {
-    const $ = loadCheerio(
-      await (
-        await this.request(`${this.site}/?s=${encodeURIComponent(searchTerm)}`)
-      ).text(),
-    );
-    const paths: string[] = [];
-    $('a.latest-postItem[href]').each((_, el) => {
-      const parts = new URL($(el).attr('href')!, this.site).pathname
-        .split('/')
-        .filter(Boolean);
-      if (parts.length < 2) return;
-      const path = `/series/${parts[0]}/`;
-      if (!paths.includes(path)) paths.push(path);
-    });
-    return paths;
-  }
-
   async searchNovels(
     searchTerm: string,
     pageNo: number,
@@ -233,20 +195,10 @@ class TinyTranslation implements Plugin.PluginBase {
     // The catalogue is a single page, so every result fits on page one and
     // later pages are empty.
     const novels = await this.catalogue();
-    const results = novels.filter(novel => {
+    return novels.filter(novel => {
       const name = novel.name.toLowerCase();
       return tokens.every(token => name.includes(token));
     });
-
-    // The site's own search also matches chapter text, which surfaces listed
-    // novels whose title does not contain the term.
-    const byPath = new Map(novels.map(novel => [novel.path, novel]));
-    for (const path of await this.chapterSearchPaths(searchTerm)) {
-      const novel = byPath.get(path);
-      if (novel && !results.some(item => item.path === path))
-        results.push(novel);
-    }
-    return results;
   }
 
   resolveUrl(path: string): string {
