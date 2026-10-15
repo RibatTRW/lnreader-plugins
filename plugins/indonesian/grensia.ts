@@ -165,33 +165,6 @@ class GrensiaPlugin implements Plugin.PluginBase {
       name,
     };
 
-    if (landing) {
-      const body = await (await fetchApi(landing.url)).text();
-      const $ = parseHTML(body);
-      $('.post-body style, .post-body script').remove();
-      const text = $('.post-body').first().text().replace(/\s+/g, ' ');
-
-      // Each field runs until the next label, since the landing text is flat.
-      const field = (label: string, stops: string) => {
-        const match = new RegExp(
-          `${label}\\s*:?\\s*(.*?)(?=\\s+(?:${stops})\\b|$)`,
-          'i',
-        ).exec(text);
-        return match && match[1].trim() ? match[1].trim() : undefined;
-      };
-
-      novel.genres = field('Genre', 'Author|Artist|Sinopsis|Volume|Chapter');
-      novel.author = field(
-        'Author(?:\\(s\\))?',
-        'Artist|Sinopsis|Genre|Volume|Chapter',
-      );
-      novel.artist = field(
-        'Artist(?:\\(s\\))?',
-        'Sinopsis|Author|Genre|Volume|Chapter',
-      );
-      novel.summary = field('Sinopsis', 'Author|Artist|Genre|Volume|Chapter');
-    }
-
     // Chapters are every post whose series name matches this novel's name.
     // The reader's search is used because it returns the full history, unlike
     // the Atom feed, which truncates long label runs.
