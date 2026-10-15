@@ -1,4 +1,3 @@
-import { load } from 'cheerio';
 import { fetchApi } from '@libs/fetch';
 import { Filters, FilterTypes } from '@libs/filterInputs';
 import { Plugin } from '@/types/plugin';
@@ -13,7 +12,7 @@ class Genesis implements Plugin.PluginBase {
   customCSS = 'src/en/genesis/customCSS.css';
   site = 'https://genesistudio.com';
   api = 'https://api.genesistudio.com';
-  version = '2.0.1';
+  version = '2.0.2';
 
   hideLocked = storage.get('hideLocked');
   pluginSettings = {
@@ -138,75 +137,18 @@ class Genesis implements Plugin.PluginBase {
   }
 
   async parseChapter(chapterPath: string): Promise<string> {
-    const url = `${this.site}${chapterPath}`;
     const id = chapterPath.replace('/viewer/', '');
 
-    // Fetch the novel's data in JSON format
-    const raw = await fetchApi(url);
-    const $ = load(await raw.text());
-    let external_api;
-    let apikey;
+    // The chapter body is served by the site's own reader endpoint
+    const json: ChapterContentJSON = await fetchApi(
+      `${this.site}/api/chapters/${id}/content`,
+    ).then(r => r.json());
 
-    const URLs: string[] = [];
-    let code;
-
-    $('head script[src]').each((_, el) => {
-      const src = $(el).attr('src')!;
-      if (!URLs.includes(src)) {
-        URLs.push(src);
-      }
-    });
-
-    for (const src of URLs) {
-      const script = await fetchApi(`${this.site}${src}`);
-      const raw = await script.text();
-      if (raw.includes('sb_publishable')) {
-        code = raw;
-        break;
-      }
+    const content = json.data?.chapter_content;
+    if (!content) {
+      throw new Error('Chapter content is unavailable');
     }
-    if (!code) {
-      throw new Error('Failed to find API Key');
-    }
-    // Find right segment of code
-    let arr = code.split(';');
-    for (const seg of arr) {
-      if (seg.includes('sb_publishable')) {
-        code = seg;
-        break;
-      }
-    }
-    arr = code.split('"');
-    for (const seg of arr) {
-      if (seg.includes('https')) {
-        external_api = seg;
-        continue;
-      }
-      if (seg.includes('sb_publishable')) {
-        apikey = seg;
-        continue;
-      }
-    }
-
-    const path = `${external_api}/rest/v1/chapters`;
-    const search = new URLSearchParams({
-      select: 'id,chapter_title,chapter_number,chapter_content,status,novel',
-      id: `eq.${id}`,
-      status: 'eq.released',
-    });
-
-    const chQuery = await fetchApi(`${path}?${search}`, {
-      method: 'GET',
-      headers: {
-        // Cookie: 'csrftoken=' + csrftoken,
-        Referer: this.site,
-        'apikey': apikey,
-        'x-client-info': 'supabase-ssr/0.7.0 createBrowserClient',
-      },
-    });
-    const json = await chQuery.json();
-    const ch = json[0].chapter_content.replaceAll('\n', '<br/>');
-    return ch;
+    return content.replaceAll('\n', '<br/>');
   }
 
   async searchNovels(
@@ -308,5 +250,11 @@ type ChapterJSON = {
       chapter_title: string;
       isUnlocked: boolean;
     }[];
+  };
+};
+
+type ChapterContentJSON = {
+  data?: {
+    chapter_content?: string | null;
   };
 };
