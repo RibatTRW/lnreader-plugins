@@ -12,7 +12,7 @@ class Genesis implements Plugin.PluginBase {
   customCSS = 'src/en/genesis/customCSS.css';
   site = 'https://genesistudio.com';
   api = 'https://api.genesistudio.com';
-  version = '2.0.2';
+  version = '2.0.3';
 
   hideLocked = storage.get('hideLocked');
   pluginSettings = {
@@ -117,8 +117,10 @@ class Genesis implements Plugin.PluginBase {
     const chapters = json.data.chapters
       .map(index => {
         const title = index.chapter_title;
-        const chapterPath = `/viewer/${index.id}`;
         const isLocked = !index.isUnlocked;
+        const chapterPath = isLocked
+          ? `/viewer/locked/${index.id}`
+          : `/viewer/${index.id}`;
         if (this.hideLocked && isLocked) return null;
         const chapterName = isLocked ? '🔒 ' + title : title;
         const chapterNum = index.chapter_number;
@@ -137,6 +139,9 @@ class Genesis implements Plugin.PluginBase {
   }
 
   async parseChapter(chapterPath: string): Promise<string> {
+    if (chapterPath.startsWith('/viewer/locked/')) {
+      throw new Error('This chapter is locked on the site');
+    }
     const id = chapterPath.replace('/viewer/', '');
 
     // The chapter body is served by the site's own reader endpoint
