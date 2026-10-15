@@ -149,7 +149,8 @@ class OnlineReadFreeNovelPlugin implements Plugin.PluginBase {
   /**
    * Walks the text pages of a book. Page 1 is the novel path itself; page `n`
    * is `p,<n>,` inserted before the id. Stops at the last page (no next
-   * link), or after two empty pages in a row.
+   * link), or after two empty pages in a row. A page answered with a non-OK
+   * status counts as empty, so it is skipped rather than failing the book.
    */
   async parsePages(
     novelPath: string,
