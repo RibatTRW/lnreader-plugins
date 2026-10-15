@@ -168,9 +168,9 @@ class TinyTranslation implements Plugin.PluginBase {
       throw new Error('TinyTranslation: no chapters were found on this page.');
 
     const seriesPath = this.seriesPath(novelPath);
-    const status = (await this.catalogue()).find(
-      novel => novel.path === seriesPath,
-    )?.status;
+    const status = await this.catalogue()
+      .then(novels => novels.find(novel => novel.path === seriesPath)?.status)
+      .catch(() => undefined);
 
     return {
       path: novelPath,
