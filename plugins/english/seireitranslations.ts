@@ -26,9 +26,9 @@ const PLACEHOLDER_COVER = 'No_image_available';
 const CHAPTER_PATH = /^\/\d{4}\/\d{2}\/[^/]+\.html$/;
 const NOVEL_PATH = /^\/search\/label\/(.+)$/;
 const NAV_TEXT = /^(previous|next|table of contents?|[|\s])+$/i;
-// Labels that are not English novel text. Indonesian translations are dropped
-// by their "[Bahasa Indonesia]" tag, or by name when the tag is missing. The
-// manhwa labels hold only images.
+// Labels that are not novels. Indonesian translations are dropped by their
+// "[Bahasa Indonesia]" tag, and the named labels are dropped because they are
+// not novels.
 const NON_ENGLISH_TAG = /\[bahasa indonesia\]/i;
 const EXCLUDED_LABELS = new Set([
   'Back Then I Adored You',
