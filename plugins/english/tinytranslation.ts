@@ -6,7 +6,7 @@ import { defaultCover } from '@libs/defaultCover';
 
 const PLACEHOLDER_COVER = /404\.png|cover-404|noimagefound/i;
 // Chapters are `/<group>/<chapter>/`; the group is usually the series slug.
-const CHAPTER_PATH = /^\/[^/]+\/[^/]+\/?$/;
+const CHAPTER_PATH = /^\/(?!series\/)[^/]+\/[^/]+\/?$/;
 
 class TinyTranslation implements Plugin.PluginBase {
   id = 'tinytranslation';
@@ -127,12 +127,14 @@ class TinyTranslation implements Plugin.PluginBase {
       for (const el of following) {
         if ($(el).is('h1, h2, h3, h4, h5, h6')) break;
         if (!$(el).is('ul')) continue;
+        let linked = false;
         $(el)
           .find('a[href]')
           .each((_, link) => {
             const parsed = new URL($(link).attr('href')!, this.site);
             if (parsed.origin !== origin || !CHAPTER_PATH.test(parsed.pathname))
               return;
+            linked = true;
             if (seen.has(parsed.pathname)) return;
             seen.add(parsed.pathname);
             const chapterName = $(link).text().trim().replace(/\s+/g, ' ');
@@ -144,6 +146,7 @@ class TinyTranslation implements Plugin.PluginBase {
               chapterNumber: number ? Number(number) : undefined,
             });
           });
+        if (!linked && chapters.length) break;
       }
     }
 
