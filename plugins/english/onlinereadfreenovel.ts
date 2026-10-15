@@ -161,8 +161,8 @@ class OnlineReadFreeNovelPlugin implements Plugin.PluginBase {
     for (let page = 1; page <= MAX_PAGES; page++) {
       const pagePath = this.pagePath(novelPath, page);
       if (page > 1 && pagePath === novelPath) return chapters;
-      const $ = page === 1 ? firstPage : await this.fetchDom(pagePath);
-      const hasText = $('#textToRead').text().trim().length > 0;
+      const $ = page === 1 ? firstPage : await this.fetchPageDom(pagePath);
+      const hasText = !!$ && $('#textToRead').text().trim().length > 0;
 
       if (hasText) {
         emptyRun = 0;
@@ -191,9 +191,14 @@ class OnlineReadFreeNovelPlugin implements Plugin.PluginBase {
   }
 
   async fetchDom(path: string): Promise<CheerioAPI> {
+    const $ = await this.fetchPageDom(path);
+    if (!$) throw new Error(`HTTP error for ${path}`);
+    return $;
+  }
+
+  async fetchPageDom(path: string): Promise<CheerioAPI | null> {
     const res = await fetchApi(this.site + path);
-    if (!res.ok) throw new Error(`HTTP ${res.status} for ${path}`);
-    return loadCheerio(await res.text());
+    return res.ok ? loadCheerio(await res.text()) : null;
   }
 
   toPath(href: string): string {
