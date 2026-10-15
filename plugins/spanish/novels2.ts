@@ -144,17 +144,17 @@ class Novels2 implements Plugin.PluginBase {
       match = chapterRe.exec(html);
     }
 
+    if (chapters.length === 0 && html.includes('\\"createdAt\\"')) {
+      throw new Error(`Could not parse chapter list for ${novelPath}`);
+    }
+
     return chapters;
   }
 
   /** Undo the JSON string escaping used inside the RSC payload. */
   private unescapeRsc(value: string): string {
-    return value
-      .replace(/\\u([0-9a-fA-F]{4})/g, (_, hex: string) =>
-        String.fromCharCode(parseInt(hex, 16)),
-      )
-      .replace(/\\"/g, '"')
-      .replace(/\\\\/g, '\\');
+    const rowEscaped: string = JSON.parse(`"${value}"`);
+    return JSON.parse(`"${rowEscaped}"`);
   }
 
   async parseChapter(chapterPath: string): Promise<string> {
