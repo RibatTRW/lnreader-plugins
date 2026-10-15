@@ -64,6 +64,13 @@ const seriesNames = (post: Post) => {
   return names;
 };
 
+// Some headlines drop words from the catalog title, but the description begins with it.
+const belongsTo = (post: Post, key: string) => {
+  if (seriesNames(post).some(name => normalize(name) === key)) return true;
+  const description = normalize(decodeEntities(post.description || ''));
+  return description.replace(/^novel/, '').indexOf(key) === 0;
+};
+
 // Some posts point at Blogger's generic "Shoebox" logo (base64 "U2hvZWJveA")
 // instead of artwork, so those are treated as having no cover.
 const usableCover = (url?: string) =>
@@ -195,7 +202,7 @@ class GrensiaPlugin implements Plugin.PluginBase {
     const matching = posts.filter(
       post =>
         indexUrls.indexOf(post.url) < 0 &&
-        seriesNames(post).some(name => normalize(name) === key),
+        belongsTo(post, key),
     );
     // Oldest first; posts published in the same minute keep chapter order.
     matching.sort(
