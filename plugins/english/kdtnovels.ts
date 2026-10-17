@@ -198,7 +198,30 @@ class KDTNovels implements Plugin.PluginBase {
     // Illustrations are placeholders that the site's script swaps for images.
     content.find('.kdt-ilus[data-ilus]').each((_, el) => {
       const src = this.absolute($(el).attr('data-ilus'));
-      $(el).replaceWith(src ? `<img src="${src}">` : '');
+      $(el).replaceWith(src ? $('<img>').attr('src', src) : '');
+    });
+
+    // The app renders this HTML as is, so drop event handlers and URLs that
+    // would run script.
+    content.find('*').each((_, el) => {
+      const node = $(el);
+      for (const name of Object.keys(el.attribs)) {
+        if (/^on/i.test(name)) {
+          node.removeAttr(name);
+        } else if (name === 'href' || name === 'src') {
+          const value = el.attribs[name]
+            .split('')
+            .filter(c => c.charCodeAt(0) > 32)
+            .join('')
+            .toLowerCase();
+          if (
+            /^(javascript|vbscript):/.test(value) ||
+            (value.startsWith('data:') && !value.startsWith('data:image/'))
+          ) {
+            node.removeAttr(name);
+          }
+        }
+      }
     });
     return content.html() || '';
   }
