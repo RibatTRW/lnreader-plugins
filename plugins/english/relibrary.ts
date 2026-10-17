@@ -178,49 +178,48 @@ class ReLibraryPlugin implements Plugin.PluginBase {
   private async popularNovelsInner(url: string): Promise<Plugin.NovelItem[]> {
     const novels: Plugin.NovelItem[] = [];
     const result = await fetchApi(url);
+    if (!result.ok) {
+      throw new Error(`Could not load ${url} (HTTP ${result.status})`);
+    }
     const body = await result.text();
 
     const loadedCheerio = loadCheerio(body);
-    loadedCheerio('.entry-content > ol > li').each((_i, el) => {
-      const novel: Partial<Plugin.NovelItem> = {};
-      novel.name = loadedCheerio(el).find('h3 > a').text();
-      novel.path = loadedCheerio(el)
-        .find('table > tbody > tr > td > a')
-        .attr('href');
-      if (novel.name === undefined || novel.path === undefined) return;
-      novel.cover =
-        loadedCheerio(el)
-          .find('table > tbody > tr > td > a > img')
-          .attr('data-cfsrc') ||
-        loadedCheerio(el)
-          .find('table > tbody > tr > td > a > img')
-          .attr('src') ||
-        defaultCover;
-      novel.path = new URL(novel.path, this.site).pathname;
-      novels.push(novel as Plugin.NovelItem);
-    });
+    loadedCheerio('.relibrary-top-novels .relibrary-novel-card').each(
+      (_i, el) => {
+        const novel: Partial<Plugin.NovelItem> = {};
+        const title = loadedCheerio(el).find('.relibrary-title a');
+        novel.name = title.text().trim();
+        novel.path = title.attr('href');
+        if (!novel.name || novel.path === undefined) return;
+        const cover = loadedCheerio(el).find('img.relibrary-cover');
+        novel.cover =
+          cover.attr('data-cfsrc') || cover.attr('src') || defaultCover;
+        novel.path = new URL(novel.path, this.site).pathname;
+        novels.push(novel as Plugin.NovelItem);
+      },
+    );
     return novels;
   }
 
   private async lastestNovelsInner(url: string): Promise<Plugin.NovelItem[]> {
     const novels: Plugin.NovelItem[] = [];
     const result = await fetchApi(url);
+    if (!result.ok) {
+      throw new Error(`Could not load ${url} (HTTP ${result.status})`);
+    }
     const body = await result.text();
 
     const loadedCheerio = loadCheerio(body);
     loadedCheerio('article.type-page.page').each((_i, el) => {
       const novel: Partial<Plugin.NovelItem> = {};
-      novel.name = loadedCheerio(el).find('.entry-title').text();
-      novel.path = loadedCheerio(el).find('.entry-title a').attr('href');
-      if (novel.path === undefined || novel.name === undefined) return;
+      // The title heading also wraps the novel card, so only read its link.
+      const title = loadedCheerio(el).find('.entry-title > a').first();
+      novel.name = title.text().trim();
+      novel.path = title.attr('href');
+      if (!novel.name || novel.path === undefined) return;
+      const cover = loadedCheerio(el).find('img.relibrary-cover');
       novel.cover =
-        loadedCheerio(el)
-          .find('.entry-content > table > tbody > tr > td > a >img')
-          .attr('data-cfsrc') ||
-        loadedCheerio(el)
-          .find('.entry-content > table > tbody > tr > td > a >img')
-          .attr('src') ||
-        defaultCover;
+        cover.attr('data-cfsrc') || cover.attr('src') || defaultCover;
       novel.path = new URL(novel.path, this.site).pathname;
       novels.push(novel as Plugin.NovelItem);
     });
