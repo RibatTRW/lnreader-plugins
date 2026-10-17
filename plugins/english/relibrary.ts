@@ -163,7 +163,7 @@ class ReLibraryPlugin implements Plugin.PluginBase {
   name = 'Re:Library';
   icon = 'src/en/relibrary/icon.png';
   site = 'https://re-library.com';
-  version = '1.0.3';
+  version = '1.0.4';
   imageRequestInit: Plugin.ImageRequestInit = {
     headers: {
       Referer: 'https://re-library.com/',
@@ -344,11 +344,29 @@ class ReLibraryPlugin implements Plugin.PluginBase {
   async parseChapter(chapterPath: string): Promise<string> {
     // parse chapter text here
     const result = await fetchApi(`${this.site}${chapterPath}`);
+    if (!result.ok) {
+      throw new Error(
+        `Could not load chapter ${chapterPath} (HTTP ${result.status})`,
+      );
+    }
     const body = await result.text();
 
     const loadedCheerio = loadCheerio(body);
 
     const entryContent = loadedCheerio('.entry-content');
+
+    // Early access chapters only show a password form until they unlock.
+    const passwordForm = entryContent.find('form.post-password-form');
+    if (passwordForm.length) {
+      const unlock = passwordForm
+        .find('.ppw-pcp-pf-desc-below-form')
+        .text()
+        .trim();
+      throw new Error(
+        `This chapter is password protected (early access) on Re:Library${unlock ? ` ${unlock}` : ''}`,
+      );
+    }
+
     const pageLinkHr = entryContent.find('.PageLink + hr').first();
     if (pageLinkHr.length) {
       // Remove all previous siblings before the .PageLink + hr
@@ -361,7 +379,12 @@ class ReLibraryPlugin implements Plugin.PluginBase {
       if (pageLink.length) {
         pageLink.remove();
       }
-      pageLinkHr.next().remove();
+      // The credits table follows the top navigation, either on its own or
+      // as the first child of a wrapper (div.ppw-restricted-content) that
+      // holds the whole chapter, so only remove the table itself.
+      const afterNav = pageLinkHr.next();
+      if (afterNav.is('table')) afterNav.remove();
+      else afterNav.children().first().filter('table').remove();
       pageLinkHr.remove();
     }
 
@@ -378,7 +401,33 @@ class ReLibraryPlugin implements Plugin.PluginBase {
       hrAfterPageLink.remove();
     }
 
-    return entryContent.html() || '';
+    // The app renders this HTML as is, so drop event handlers and URLs that
+    // would run script.
+    entryContent.find('script, style, noscript').remove();
+    entryContent.find('*').each((_i, el) => {
+      const node = loadedCheerio(el);
+      for (const name of Object.keys(el.attribs)) {
+        if (/^on/i.test(name)) {
+          node.removeAttr(name);
+        } else if (name === 'href' || name === 'src') {
+          const value = el.attribs[name]
+            .split('')
+            .filter(c => c.charCodeAt(0) > 32)
+            .join('')
+            .toLowerCase();
+          if (
+            /^(javascript|vbscript):/.test(value) ||
+            (value.startsWith('data:') && !value.startsWith('data:image/'))
+          ) {
+            node.removeAttr(name);
+          }
+        }
+      }
+    });
+
+    const html = entryContent.html()?.trim();
+    if (!html) throw new Error(`No chapter text found at ${chapterPath}`);
+    return html;
   }
 
   async searchNovels(
