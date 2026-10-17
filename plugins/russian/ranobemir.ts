@@ -17,7 +17,7 @@ class RanobeMir implements Plugin.PluginBase {
   name = 'РанобэМир';
   icon = 'src/ru/ranobemir/icon.png';
   site = 'https://ranobemir.com';
-  version = '1.0.0';
+  version = '1.0.1';
 
   imageRequestInit: Plugin.ImageRequestInit = { headers };
 
@@ -135,6 +135,31 @@ class RanobeMir implements Plugin.PluginBase {
     const article = $('article[data-chapter-url]');
     // The collapsible «Ранее в ...» recap precedes the real chapter text.
     article.find('details.collapse').remove();
+    article.find('script, style, noscript').remove();
+
+    // The app renders this HTML as is, so drop event handlers and URLs that
+    // would run script.
+    article.find('*').each((_, el) => {
+      const node = $(el);
+      for (const name of Object.keys(el.attribs)) {
+        if (/^on/i.test(name)) {
+          node.removeAttr(name);
+        } else if (name === 'href' || name === 'src') {
+          const value = el.attribs[name]
+            .split('')
+            .filter(c => c.charCodeAt(0) > 32)
+            .join('')
+            .toLowerCase();
+          if (
+            /^(javascript|vbscript):/.test(value) ||
+            (value.startsWith('data:') && !value.startsWith('data:image/'))
+          ) {
+            node.removeAttr(name);
+          }
+        }
+      }
+    });
+
     return article
       .find('p')
       .map((_, el) => $.html(el))
