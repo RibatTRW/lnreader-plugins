@@ -326,7 +326,13 @@ class Toasteful implements Plugin.PluginBase {
         currentPath = nextPath;
         const $part = loadCheerio(await response.text());
         next = $part('.ChapterNav a.next').attr('href');
-        parts.push(this.chapterContent($part));
+        const content = this.chapterContent($part);
+        // An empty part would otherwise hide behind part 1's length.
+        if (!loadCheerio(content).text().trim())
+          throw new Error(
+            `Toasteful: no readable chapter text was found in ${nextPath}.`,
+          );
+        parts.push(content);
       }
     }
 
