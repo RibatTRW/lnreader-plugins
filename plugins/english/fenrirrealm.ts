@@ -422,11 +422,14 @@ class FenrirRealmPlugin implements Plugin.PluginBase {
       headers: readToken ? { Authorization: `Bearer ${readToken}` } : {},
     });
     if (!res.ok) {
-      const error: HttpError = new Error(
-        `Failed to load chapter (HTTP ${res.status}). Open it in WebView and try again.`,
-      );
-      error.status = res.status;
-      throw error;
+      if ([401, 403, 429, 503].includes(res.status)) {
+        const error: HttpError = new Error(
+          `Failed to load chapter (HTTP ${res.status}). Open it in WebView and try again.`,
+        );
+        error.status = res.status;
+        throw error;
+      }
+      return { id: 0, uuid: null, content: null, remint_chapter_id: null };
     }
     return res.json();
   }
