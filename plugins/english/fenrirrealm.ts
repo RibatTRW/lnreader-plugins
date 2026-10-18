@@ -31,6 +31,21 @@ type APIChapter = {
   created_at: string;
 };
 
+type APIChapterContent = {
+  id: number;
+  uuid: string | null;
+  content: string | null;
+  content_format?: string;
+  remint_chapter_id: number | null;
+};
+
+type ReadTokenResult = {
+  token?: string;
+  status?: number;
+};
+
+type HttpError = Error & { status?: number };
+
 type ChapterInfo = {
   name: string;
   path: string;
@@ -75,7 +90,7 @@ class FenrirRealmPlugin implements Plugin.PluginBase {
   name = 'Fenrir Realm';
   icon = 'src/en/fenrirrealm/icon.png';
   site = 'https://fenrirealm.com';
-  version = '1.1.3';
+  version = '1.1.4';
   imageRequestInit?: Plugin.ImageRequestInit | undefined = undefined;
 
   hideLocked = storage.get('hideLocked');
@@ -218,8 +233,27 @@ class FenrirRealmPlugin implements Plugin.PluginBase {
     const chapterId = chapterPath.split('~~')[1];
     if (chapterId) {
       const url = `${this.site}/api/new/v2/chapters/${chapterId}`;
-      const res = await fetchApi(url);
-      const json = await res.json();
+      let json = await this.fetchChapterContent(url);
+
+      if (json.content_format === 'locked') {
+        // Free chapters are gated behind a Cloudflare Turnstile check. Once it
+        // has been passed in WebView, the session can mint a read token for
+        // this chapter the same way the site's own reader does.
+        const readToken = await this.mintReadToken(json);
+        if (readToken.token) {
+          json = await this.fetchChapterContent(url, readToken.token);
+        }
+        if (json.content_format === 'locked') {
+          const error: HttpError = new Error(
+            'Fenrir Realm requires a human verification check to read this chapter. Open it in WebView, complete the check, then try again.',
+          );
+          // Keep the read-token status (403 without a verified session) so
+          // callers can tell an anti-bot refusal from a parsing failure.
+          error.status = readToken.status;
+          throw error;
+        }
+      }
+
       const content = json.content;
 
       if (content) {
@@ -303,7 +337,7 @@ class FenrirRealmPlugin implements Plugin.PluginBase {
     }
 
     // Fallback or old method
-    const url = `${this.site}/series/${chapterPath.split('~~')[0]}`;
+    const url = this.resolveUrl(chapterPath);
     const result = await fetchApi(url);
     const body = await result.text();
 
@@ -380,6 +414,42 @@ class FenrirRealmPlugin implements Plugin.PluginBase {
     return chapterText;
   }
 
+  async fetchChapterContent(
+    url: string,
+    readToken?: string,
+  ): Promise<APIChapterContent> {
+    const res = await fetchApi(url, {
+      headers: readToken ? { Authorization: `Bearer ${readToken}` } : {},
+    });
+    if (!res.ok) {
+      const error: HttpError = new Error(
+        `Failed to load chapter (HTTP ${res.status}). Open it in WebView and try again.`,
+      );
+      error.status = res.status;
+      throw error;
+    }
+    return res.json();
+  }
+
+  async mintReadToken(chapter: APIChapterContent): Promise<ReadTokenResult> {
+    const chapterId = chapter.remint_chapter_id || chapter.uuid || chapter.id;
+    try {
+      const res = await fetchApi(`${this.site}/api/read-token`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+        body: JSON.stringify({ chapter_id: String(chapterId) }),
+      });
+      if (!res.ok) return { status: res.status };
+      const json = await res.json();
+      return json.active && json.token ? { token: json.token } : {};
+    } catch {
+      return {};
+    }
+  }
+
   async searchNovels(
     searchTerm: string,
     pageNo: number,
@@ -417,7 +487,12 @@ class FenrirRealmPlugin implements Plugin.PluginBase {
   }
 
   resolveUrl(path: string): string {
-    return `${this.site}/series/${path.split('~~')[0]}`;
+    // Volume chapter slugs now include the volume (e.g. "vol1/1"), so paths
+    // built as novel/vol1/vol1/1 must drop the repeated volume segment.
+    const chapterPath = path
+      .split('~~')[0]
+      .replace(/^([^/]+)\/([^/]+)\/\2\//, '$1/$2/');
+    return `${this.site}/series/${chapterPath}`;
   }
 
   filters = {
