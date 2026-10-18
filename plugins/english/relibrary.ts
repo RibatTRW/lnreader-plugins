@@ -179,7 +179,10 @@ class ReLibraryPlugin implements Plugin.PluginBase {
     const novels: Plugin.NovelItem[] = [];
     const result = await fetchApi(url);
     if (!result.ok) {
-      throw new Error(`Could not load ${url} (HTTP ${result.status})`);
+      throw Object.assign(
+        new Error(`Could not load ${url} (HTTP ${result.status})`),
+        { status: result.status, response: result },
+      );
     }
     const body = await result.text();
 
@@ -205,7 +208,10 @@ class ReLibraryPlugin implements Plugin.PluginBase {
     const novels: Plugin.NovelItem[] = [];
     const result = await fetchApi(url);
     if (!result.ok) {
-      throw new Error(`Could not load ${url} (HTTP ${result.status})`);
+      throw Object.assign(
+        new Error(`Could not load ${url} (HTTP ${result.status})`),
+        { status: result.status, response: result },
+      );
     }
     const body = await result.text();
 
@@ -344,8 +350,11 @@ class ReLibraryPlugin implements Plugin.PluginBase {
     // parse chapter text here
     const result = await fetchApi(`${this.site}${chapterPath}`);
     if (!result.ok) {
-      throw new Error(
-        `Could not load chapter ${chapterPath} (HTTP ${result.status})`,
+      throw Object.assign(
+        new Error(
+          `Could not load chapter ${chapterPath} (HTTP ${result.status})`,
+        ),
+        { status: result.status, response: result },
       );
     }
     const body = await result.text();
