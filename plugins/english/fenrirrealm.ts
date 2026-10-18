@@ -124,13 +124,21 @@ class FenrirRealmPlugin implements Plugin.PluginBase {
 
     const res = await fetchApi(
       `${this.site}/api/new/v2/series?${params.toString()}`,
-    ).then(r =>
-      r.json().catch(() => {
-        throw new Error(
+    ).then(r => {
+      const failure = () => {
+        const error: HttpError = new Error(
           'There was an error fetching the data from the server. Please try to open it in WebView',
         );
-      }),
-    );
+        // Keep the real HTTP status so an anti-bot refusal is distinguishable
+        // from a parsing failure.
+        if (!r.ok) error.status = r.status;
+        return error;
+      };
+      if (!r.ok) throw failure();
+      return r.json().catch(() => {
+        throw failure();
+      });
+    });
 
     return (res.data || []).map((r: APINovel) => this.parseNovelFromApi(r));
   }
