@@ -373,7 +373,7 @@ class FenrirRealmPlugin implements Plugin.PluginBase {
 
     // Fallback to SvelteKit JSON if HTML parsing fails or is empty
     try {
-      const jsonUrl = `${this.site}/series/${chapterPath.split('~~')[0]}/__data.json?x-sveltekit-invalidated=001`;
+      const jsonUrl = `${this.resolveUrl(chapterPath)}/__data.json?x-sveltekit-invalidated=001`;
       const jsonRes = await fetchApi(jsonUrl);
       const json: Nodes = await jsonRes.json();
 
