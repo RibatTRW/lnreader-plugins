@@ -280,7 +280,7 @@ class TensurafanPlugin implements Plugin.PluginBase {
 
     const $ = loadCheerio(body, null, false);
     // The full-page title card repeats the heading that follows it as text.
-    $('script, style, noscript, p.pagebreak').remove();
+    $('script, style, noscript, iframe, object, embed, p.pagebreak').remove();
     $('div:has(> img[src*="/title_cards/"])').remove();
     $('img').each((_, el) => {
       const img = $(el);
