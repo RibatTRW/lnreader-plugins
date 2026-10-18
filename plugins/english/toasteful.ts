@@ -318,7 +318,10 @@ class Toasteful implements Plugin.PluginBase {
           break;
         if ((await this.listedPaths(novelPath)).has(nextPath)) break;
         const response = await fetchApi(this.site + nextPath);
-        if (!response.ok) break;
+        if (response.status === 404) break;
+        if (!response.ok) {
+          throw new Error(`Toasteful: HTTP ${response.status}.`);
+        }
         seen.add(nextPath);
         currentPath = nextPath;
         const $part = loadCheerio(await response.text());
