@@ -108,14 +108,52 @@ function asNumber(value: unknown, what: string): number {
   return value;
 }
 
+const NAMED_ENTITIES: Record<string, string> = {
+  nbsp: ' ',
+  amp: '&',
+  lt: '<',
+  gt: '>',
+  quot: '"',
+  apos: "'",
+  lsquo: '\u2018',
+  rsquo: '\u2019',
+  sbquo: '\u201A',
+  ldquo: '\u201C',
+  rdquo: '\u201D',
+  bdquo: '\u201E',
+  hellip: '\u2026',
+  ndash: '\u2013',
+  mdash: '\u2014',
+  middot: '\u00B7',
+  bull: '\u2022',
+  laquo: '\u00AB',
+  raquo: '\u00BB',
+  copy: '\u00A9',
+  deg: '\u00B0',
+  times: '\u00D7',
+};
+
+function fromCodePoint(code: number): string {
+  if (code > 0x10ffff || (code >= 0xd800 && code <= 0xdfff)) return '';
+  if (code <= 0xffff) return String.fromCharCode(code);
+  const offset = code - 0x10000;
+  return String.fromCharCode(
+    0xd800 + (offset >> 10),
+    0xdc00 + (offset & 0x3ff),
+  );
+}
+
+// Single pass, so an escaped entity such as "&amp;lt;" decodes only once.
 function decodeEntities(text: string): string {
-  return text
-    .replace(/&nbsp;/gi, ' ')
-    .replace(/&amp;/gi, '&')
-    .replace(/&lt;/gi, '<')
-    .replace(/&gt;/gi, '>')
-    .replace(/&quot;/gi, '"')
-    .replace(/&#0?39;/gi, "'");
+  return text.replace(
+    /&(?:#(\d+)|#x([0-9a-f]+)|([a-z]+));/gi,
+    (match: string, dec?: string, hex?: string, name?: string) => {
+      if (dec) return fromCodePoint(parseInt(dec, 10)) || match;
+      if (hex) return fromCodePoint(parseInt(hex, 16)) || match;
+      const named = NAMED_ENTITIES[(name || '').toLowerCase()];
+      return named === undefined ? match : named;
+    },
+  );
 }
 
 /** Novel descriptions are sometimes plain text, sometimes HTML. */
