@@ -301,6 +301,11 @@ const READER_CHROME = [
   'Background Color',
 ];
 
+const SITE_NOTICE_TEXTS = [
+  'Provided by Noveli.to',
+  'If you want to support more free releases please read on Noveli.to',
+];
+
 function parseChapterBody(data: unknown): string {
   const res = data as { chapter?: unknown };
   if (!isRecord(res.chapter)) {
@@ -331,7 +336,9 @@ function parseChapterBody(data: unknown): string {
         ? decodeEntities(paragraph['text'])
         : plainText(html);
     const trimmed = text.replace(/^\s+|\s+$/g, '');
-    if (trimmed === '') continue;
+    if (trimmed === '' || SITE_NOTICE_TEXTS.indexOf(trimmed) !== -1) {
+      continue;
+    }
     texts.push(trimmed);
   }
   let start = 0;
