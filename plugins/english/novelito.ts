@@ -328,7 +328,7 @@ function parseChapterBody(data: unknown): string {
     }
     const text =
       typeof paragraph['text'] === 'string'
-        ? paragraph['text']
+        ? decodeEntities(paragraph['text'])
         : plainText(html);
     const trimmed = text.replace(/^\s+|\s+$/g, '');
     if (trimmed === '') continue;
