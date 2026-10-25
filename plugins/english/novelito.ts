@@ -49,8 +49,28 @@ function httpError(message: string, status: number): Error {
   return err;
 }
 
+const MAX_RETRIES = 2;
+const MAX_RETRY_WAIT_MS = 10000;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 async function fetchJson(url: string, what: string): Promise<unknown> {
-  const res = await fetchApi(url, { headers: BROWSER_HEADERS });
+  let res = await fetchApi(url, { headers: BROWSER_HEADERS });
+  for (
+    let attempt = 0;
+    res.status === 429 && attempt < MAX_RETRIES;
+    attempt++
+  ) {
+    const retryAfter = parseInt(res.headers.get('Retry-After') || '', 10);
+    const waitMs = Math.min(
+      isNaN(retryAfter) ? 1000 : retryAfter * 1000,
+      MAX_RETRY_WAIT_MS,
+    );
+    await sleep(waitMs);
+    res = await fetchApi(url, { headers: BROWSER_HEADERS });
+  }
   if (!res.ok) {
     throw httpError(`${what}: HTTP ${res.status}`, res.status);
   }
@@ -271,6 +291,16 @@ function parseChapters(data: unknown, novelId: number): Plugin.ChapterItem[] {
   return chapters;
 }
 
+const READER_CHROME = [
+  'Settings',
+  'Font Size',
+  'A',
+  'A',
+  '16px',
+  'Font Family',
+  'Background Color',
+];
+
 function parseChapterBody(data: unknown): string {
   const res = data as { chapter?: unknown };
   if (!isRecord(res.chapter)) {
@@ -280,7 +310,7 @@ function parseChapterBody(data: unknown): string {
   if (!Array.isArray(paragraphs)) {
     throw new Error('Novelito chapter is missing its paragraphs array');
   }
-  const parts: string[] = [];
+  const texts: string[] = [];
   for (const paragraph of paragraphs) {
     if (!isRecord(paragraph)) continue;
     const html = typeof paragraph['html'] === 'string' ? paragraph['html'] : '';
@@ -302,7 +332,22 @@ function parseChapterBody(data: unknown): string {
         : plainText(html);
     const trimmed = text.replace(/^\s+|\s+$/g, '');
     if (trimmed === '') continue;
-    parts.push('<p>' + escapeHtml(trimmed) + '</p>');
+    texts.push(trimmed);
+  }
+  let start = 0;
+  if (texts.length >= READER_CHROME.length) {
+    let matches = true;
+    for (let i = 0; i < READER_CHROME.length; i++) {
+      if (texts[i] !== READER_CHROME[i]) {
+        matches = false;
+        break;
+      }
+    }
+    if (matches) start = READER_CHROME.length;
+  }
+  const parts: string[] = [];
+  for (let i = start; i < texts.length; i++) {
+    parts.push('<p>' + escapeHtml(texts[i]) + '</p>');
   }
   if (parts.length === 0) {
     throw new Error('Novelito chapter has no readable content');
@@ -428,18 +473,6 @@ class Novelito implements Plugin.PluginBase {
       novel.rating = rating;
     }
     return novel;
-  }
-
-  // The app opens a novel already saved in its database but with no
-  // stored chapters through parsePage, not parseNovel. This plugin has
-  // no server-side chapter paging, so every page is the whole list.
-  async parsePage(
-    novelPathParam: string,
-    page: string,
-  ): Promise<Plugin.SourcePage> {
-    void page;
-    const novel = await this.parseNovel(novelPathParam);
-    return { chapters: novel.chapters || [] };
   }
 
   async parseChapter(path: string): Promise<string> {
