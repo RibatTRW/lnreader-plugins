@@ -623,13 +623,20 @@ class FenrirRealmPlugin implements Plugin.PluginBase {
 
     const res = await fetchApi(
       `${this.site}/api/new/v2/series?${params.toString()}`,
-    ).then(r =>
-      r.json().catch(() => {
-        throw new Error(
-          'There was an error fetching the data from the server. Please try to open it in WebView',
-        );
-      }),
-    );
+    ).then(async r => {
+      const error: Error & { status?: number } = new Error(
+        'There was an error fetching the data from the server. Please try to open it in WebView',
+      );
+      // Keep the real HTTP status so a block page is distinguishable from a
+      // parsing failure.
+      if (!r.ok) {
+        error.status = r.status;
+        throw error;
+      }
+      return r.json().catch(() => {
+        throw error;
+      });
+    });
 
     return (res.data || []).map((r: APINovel) => this.parseNovelFromApi(r));
   }
