@@ -448,6 +448,7 @@ class FenrirRealmPlugin implements Plugin.PluginBase {
         data = await requestMint(null);
       }
       if (data) {
+        this.lastMintRefusal = null;
         const numericId =
           typeof cid === 'number' && cid > 0
             ? cid
@@ -753,6 +754,7 @@ class FenrirRealmPlugin implements Plugin.PluginBase {
 
   async parseChapter(chapterPath: string): Promise<string> {
     const [slugPath, chapterId] = chapterPath.split('~~');
+    this.lastMintRefusal = null;
     const apiUrl = chapterId
       ? `${this.site}/api/new/v2/chapters/${chapterId}`
       : `${this.site}/api/new/v2/series/${slugPath}`;
