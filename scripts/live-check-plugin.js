@@ -33,6 +33,9 @@ function isNetworkOrBlockError(error) {
   if (/timed? ?out/i.test(message)) {
     return { inconclusive: true, reason: 'Timeout' };
   }
+  if (/bot check/i.test(message)) {
+    return { inconclusive: true, reason: 'Anti-bot check' };
+  }
   // Only 403/503 indicate a block — a cf-ray/cf-cache-status header alone
   // just means the site is fronted by Cloudflare's CDN (true for a huge
   // share of the web) and says nothing about whether we were blocked.
