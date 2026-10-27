@@ -126,6 +126,15 @@ class NovelBinPlugin implements Plugin.PluginBase {
 
   async fetchJson<T>(file: string): Promise<T | null> {
     const response = await fetchApi(this.apiBase + file);
+    const contentType = response.headers.get('content-type') || '';
+    if (
+      response.headers.get('cf-mitigated') === 'challenge' ||
+      (response.status === 403 && !contentType.includes('json'))
+    ) {
+      throw new Error(
+        'Site is showing a security check, please open it in WebView and complete it.',
+      );
+    }
     // Missing files (unknown slugs, pages past the end) come back as 403/404.
     if (response.status === 403 || response.status === 404) return null;
     if (!response.ok) {
