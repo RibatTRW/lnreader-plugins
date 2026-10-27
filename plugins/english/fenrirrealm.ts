@@ -302,6 +302,7 @@ class FenrirRealmPlugin implements Plugin.PluginBase {
   imageRequestInit?: Plugin.ImageRequestInit | undefined = undefined;
 
   private cachedReadToken: CachedReadToken | null = null;
+  private lastMintRefusal: Response | null = null;
 
   hideLocked = storage.get('hideLocked');
   pluginSettings = {
@@ -405,6 +406,7 @@ class FenrirRealmPlugin implements Plugin.PluginBase {
     chapterTarget?: string | number | null,
     cid?: number | null,
   ): Promise<boolean> {
+    this.lastMintRefusal = null;
     try {
       const payload: Record<string, string> = {};
       if (
@@ -427,7 +429,10 @@ class FenrirRealmPlugin implements Plugin.PluginBase {
           headers,
           body: JSON.stringify(payload),
         });
-        if (!res.ok) return null;
+        if (!res.ok) {
+          this.lastMintRefusal = res;
+          return null;
+        }
         const data = await res.json();
         return data?.active &&
           typeof data.token === 'string' &&
@@ -457,6 +462,17 @@ class FenrirRealmPlugin implements Plugin.PluginBase {
     } catch {
       return false;
     }
+  }
+
+  private verifyInWebViewError(refusal?: Response | null): Error {
+    const error: Error & { status?: number; response?: Response } = new Error(
+      'Chapter is protected by Cloudflare Turnstile. Please open this chapter in WebView to verify and try again.',
+    );
+    if (refusal && !refusal.ok) {
+      error.status = refusal.status;
+      error.response = refusal;
+    }
+    return error;
   }
 
   private async getReadToken(
@@ -768,6 +784,15 @@ class FenrirRealmPlugin implements Plugin.PluginBase {
         }
         this.captureReadTokenHeader(res, initialCid);
       }
+      if (!res.ok && res.status === 403) {
+        throw this.verifyInWebViewError(
+          this.lastMintRefusal?.status === 403 ? this.lastMintRefusal : res,
+        );
+      }
+    }
+
+    if (res.status === 401 || res.status === 503) {
+      throw this.verifyInWebViewError(res);
     }
 
     if (res.ok) {
@@ -848,13 +873,7 @@ class FenrirRealmPlugin implements Plugin.PluginBase {
 
       if (json.content_format === 'locked') {
         this.cachedReadToken = null;
-        const error: Error & { status?: number } = new Error(
-          'Chapter is protected by Cloudflare Turnstile. Please open this chapter in WebView to verify and try again.',
-        );
-        // Keep an HTTP status so callers can tell an anti-bot refusal from a
-        // parsing failure.
-        error.status = 403;
-        throw error;
+        throw this.verifyInWebViewError(this.lastMintRefusal);
       }
 
       if (typeof json.content === 'string' && json.content) {
