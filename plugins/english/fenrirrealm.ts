@@ -298,7 +298,7 @@ class FenrirRealmPlugin implements Plugin.PluginBase {
   name = 'Fenrir Realm';
   icon = 'src/en/fenrirrealm/icon.png';
   site = 'https://fenrirealm.com';
-  version = '1.1.4';
+  version = '1.1.5';
   imageRequestInit?: Plugin.ImageRequestInit | undefined = undefined;
 
   private cachedReadToken: CachedReadToken | null = null;
@@ -841,9 +841,13 @@ class FenrirRealmPlugin implements Plugin.PluginBase {
 
       if (json.content_format === 'locked') {
         this.cachedReadToken = null;
-        throw new Error(
+        const error: Error & { status?: number } = new Error(
           'Chapter is protected by Cloudflare Turnstile. Please open this chapter in WebView to verify and try again.',
         );
+        // Keep an HTTP status so callers can tell an anti-bot refusal from a
+        // parsing failure.
+        error.status = 403;
+        throw error;
       }
 
       if (typeof json.content === 'string' && json.content) {
@@ -852,7 +856,7 @@ class FenrirRealmPlugin implements Plugin.PluginBase {
     }
 
     // Fallback or old method
-    const url = `${this.site}/series/${slugPath}`;
+    const url = this.resolveUrl(chapterPath);
     const result = await fetchApi(url);
     const body = await result.text();
 
@@ -881,7 +885,7 @@ class FenrirRealmPlugin implements Plugin.PluginBase {
 
     // Fallback to SvelteKit JSON if HTML parsing fails or is empty
     try {
-      const jsonUrl = `${this.site}/series/${slugPath}/__data.json?x-sveltekit-invalidated=001`;
+      const jsonUrl = `${this.resolveUrl(chapterPath)}/__data.json?x-sveltekit-invalidated=001`;
       const jsonRes = await fetchApi(jsonUrl);
       const json: Nodes = await jsonRes.json();
 
@@ -940,7 +944,12 @@ class FenrirRealmPlugin implements Plugin.PluginBase {
   }
 
   resolveUrl(path: string): string {
-    return `${this.site}/series/${path.split('~~')[0]}`;
+    // Volume chapter slugs already include the volume (e.g. "vol1/1"), so a
+    // path built as novel/vol1/vol1/1 must drop the repeated volume segment.
+    const chapterPath = path
+      .split('~~')[0]
+      .replace(/^([^/]+)\/([^/]+)\/\2\//, '$1/$2/');
+    return `${this.site}/series/${chapterPath}`;
   }
 
   filters = {
