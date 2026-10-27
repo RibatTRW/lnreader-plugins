@@ -54,7 +54,7 @@ class NovelBinPlugin implements Plugin.PluginBase {
   // the site's own /api/cdn/ route serves the same files.
   apiBase = this.site + 'api/cdn/';
 
-  private searchIndex: SearchEntry[] | null = null;
+  private searchIndex: Promise<SearchEntry[]> | null = null;
   private novelIds: Record<string, number> = {};
 
   filters = {
@@ -127,7 +127,12 @@ class NovelBinPlugin implements Plugin.PluginBase {
   async fetchJson<T>(file: string): Promise<T | null> {
     const response = await fetchApi(this.apiBase + file);
     // Missing files (unknown slugs, pages past the end) come back as 403/404.
-    if (!response.ok) return null;
+    if (response.status === 403 || response.status === 404) return null;
+    if (!response.ok) {
+      throw new Error(
+        `Could not reach site (${response.status}: ${response.statusText}) try to open in webview.`,
+      );
+    }
     return (await response.json()) as T;
   }
 
@@ -285,15 +290,22 @@ class NovelBinPlugin implements Plugin.PluginBase {
     searchTerm: string,
     pageNo: number,
   ): Promise<Plugin.NovelItem[]> {
-    // The site searches one ~7.5 MB index on the client; load it once.
+    // The site searches one ~7.5 MB index on the client; load it once, and
+    // share the pending download between overlapping searches.
     if (!this.searchIndex) {
-      this.searchIndex = await this.fetchList<SearchEntry[]>('search');
-      if (!this.searchIndex)
-        throw new Error('Could not load the search index.');
+      this.searchIndex = this.fetchList<SearchEntry[]>('search').then(index => {
+        if (!index) throw new Error('Could not load the search index.');
+        return index;
+      });
+      // Let a later search retry after a failed download.
+      this.searchIndex.catch(() => {
+        this.searchIndex = null;
+      });
     }
+    const searchIndex = await this.searchIndex;
 
     const term = searchTerm.toLowerCase().trim();
-    return this.searchIndex
+    return searchIndex
       .filter(
         novel =>
           novel.title.toLowerCase().includes(term) ||
@@ -304,6 +316,8 @@ class NovelBinPlugin implements Plugin.PluginBase {
   }
 
   resolveUrl = (path: string) => {
+    // Covers (and defaultCover) are already absolute.
+    if (/^https?:\/\//i.test(path)) return path;
     // Old novelbin.com paths have no page on this site; open the novel instead.
     if (path.startsWith('b/')) {
       return this.site + 'novel/' + this.getSlug(path);
